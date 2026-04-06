@@ -1,0 +1,122 @@
+[
+    {
+        "M\u00eas": "2026-03",
+        "Saldo Inicial": -238.7,
+        "e_m": 1575.9,
+        "s_m": 1421.0,
+        "Fluxo Prov.": 154.9000000000001,
+        "cv_pend_m": 760.0,
+        "inv_pend_m": 0,
+        "Caixa Livre Real": -843.8
+    },
+    {
+        "M\u00eas": "2026-04",
+        "Saldo Inicial": -843.8,
+        "e_m": 9790.71,
+        "s_m": 7199.049999999999,
+        "Fluxo Prov.": 2591.66,
+        "cv_pend_m": 2650.0,
+        "inv_pend_m": 0,
+        "Caixa Livre Real": -902.1400000000001
+    },
+    {
+        "M\u00eas": "2026-05",
+        "Saldo Inicial": -902.1400000000001,
+        "e_m": 9790.71,
+        "s_m": 3300.77,
+        "Fluxo Prov.": 6489.939999999999,
+        "cv_pend_m": 2650.0,
+        "inv_pend_m": 0,
+        "Caixa Livre Real": 2937.7999999999984
+    },
+    {
+        "M\u00eas": "2026-06",
+        "Saldo Inicial": 2937.7999999999984,
+        "e_m": 9588.54,
+        "s_m": 3395.04,
+        "Fluxo Prov.": 6193.500000000001,
+        "cv_pend_m": 2650.0,
+        "inv_pend_m": 0,
+        "Caixa Livre Real": 6481.299999999999
+    },
+    {
+        "M\u00eas": "2026-07",
+        "Saldo Inicial": 6481.299999999999,
+        "e_m": 9000.0,
+        "s_m": 1606.5,
+        "Fluxo Prov.": 7393.5,
+        "cv_pend_m": 2650.0,
+        "inv_pend_m": 0,
+        "Caixa Livre Real": 11224.8
+    },
+    {
+        "M\u00eas": "2026-08",
+        "Saldo Inicial": 11224.8,
+        "e_m": 9000.0,
+        "s_m": 1506.8,
+        "Fluxo Prov.": 7493.2,
+        "cv_pend_m": 2650.0,
+        "inv_pend_m": 0,
+        "Caixa Livre Real": 16068.0
+    },
+    {
+        "M\u00eas": "2026-09",
+        "Saldo Inicial": 16068.0,
+        "e_m": 9000.0,
+        "s_m": 1492.9,
+        "Fluxo Prov.": 7507.1,
+        "cv_pend_m": 2650.0,
+        "inv_pend_m": 0,
+        "Caixa Livre Real": 20925.1
+    },
+    {
+        "M\u00eas": "2026-10",
+        "Saldo Inicial": 20925.1,
+        "e_m": 9000.0,
+        "s_m": 1492.9,
+        "Fluxo Prov.": 7507.1,
+        "cv_pend_m": 2650.0,
+        "inv_pend_m": 0,
+        "Caixa Livre Real": 25782.199999999997
+    },
+    {
+        "M\u00eas": "2026-11",
+        "Saldo Inicial": 25782.199999999997,
+        "e_m": 9000.0,
+        "s_m": 1470.0,
+        "Fluxo Prov.": 7530.0,
+        "cv_pend_m": 2650.0,
+        "inv_pend_m": 0,
+        "Caixa Livre Real": 30662.199999999997
+    },
+    {
+        "M\u00eas": "2026-12",
+        "Saldo Inicial": 30662.199999999997,
+        "e_m": 9000.0,
+        "s_m": 1470.0,
+        "Fluxo Prov.": 7530.0,
+        "cv_pend_m": 2650.0,
+        "inv_pend_m": 0,
+        "Caixa Livre Real": 35542.2
+    },
+    {
+        "M\u00eas": "2027-01",
+        "Saldo Inicial": 35542.2,
+        "e_m": 9000.0,
+        "s_m": 1470.0,
+        "Fluxo Prov.": 7530.0,
+        "cv_pend_m": 2650.0,
+        "inv_pend_m": 0,
+        "Caixa Livre Real": 40422.2
+    },
+    {
+        "M\u00eas": "2027-02",
+        "Saldo Inicial": 40422.2,
+        "e_m": 9000.0,
+        "s_m": 1470.0,
+        "Fluxo Prov.": 7530.0,
+        "cv_pend_m": 2650.0,
+        "inv_pend_m": 0,
+        "Caixa Livre Real": 45302.2
+    }
+]

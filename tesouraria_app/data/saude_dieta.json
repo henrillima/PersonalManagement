@@ -1,0 +1,42 @@
+[
+    {
+        "id": "d5740561-23a6-4400-8644-287028763ba5",
+        "data": "2026-03-12",
+        "refeicao": "Caf\u00e9 da manh\u00e3",
+        "descricao": "1 YoPro 250mL Sabor Morango 15g Prote\u00edna",
+        "calorias": 120,
+        "proteina": 15,
+        "carboidrato": 10,
+        "gordura": 0
+    },
+    {
+        "id": "3c2c7e5f-2f1b-4750-91ba-31560fafd86e",
+        "data": "2026-03-11",
+        "refeicao": "Almo\u00e7o",
+        "descricao": "150g de Picanha, 100g de Fraldinha, 50g de Peixe Grelhado, Salada Variada de Folhas, Frutas e Ovos de Codorna",
+        "calorias": 1025,
+        "proteina": 90,
+        "carboidrato": 30,
+        "gordura": 70
+    },
+    {
+        "id": "98d47512-0650-4723-bb6f-f8b118a8d261",
+        "data": "2026-03-11",
+        "refeicao": "Caf\u00e9 da manh\u00e3",
+        "descricao": "1 fogazza de queijo com br\u00f3colis",
+        "calorias": 300,
+        "proteina": 10,
+        "carboidrato": 40,
+        "gordura": 12
+    },
+    {
+        "id": "def51f64-d87e-4b7f-8773-ac0f89711e19",
+        "data": "2026-03-11",
+        "refeicao": "Caf\u00e9 da manh\u00e3",
+        "descricao": "1 peda\u00e7o pequeno de brownie de chocolate",
+        "calorias": 150,
+        "proteina": 2,
+        "carboidrato": 20,
+        "gordura": 7
+    }
+]

@@ -1,0 +1,29 @@
+{
+    "base": {
+        "Moradia": 0.0,
+        "Transporte & Gasolina": 400.0,
+        "Alimenta\u00e7\u00e3o (Mercado)": 500.0,
+        "Alimenta\u00e7\u00e3o (Ifood/Restaurante)": 1000.0,
+        "Lazer & Rol\u00ea": 400.0,
+        "Sa\u00fade": 0.0,
+        "Educa\u00e7\u00e3o & Trabalho": 0.0,
+        "V\u00eddeogame & Assinaturas": 100.0,
+        "Compras Gerais": 0.0,
+        "Fam\u00edlia": 250.0,
+        "Outros": 0.0
+    },
+    "excecoes": [
+        {
+            "id": "c3af8073-2800-4854-b6d7-53da6558b044",
+            "M\u00eas Alvo": "2026-03",
+            "Categoria": "Fam\u00edlia",
+            "Novo Teto": 0.0
+        },
+        {
+            "id": "380a2d8b-f119-4c89-a570-2159ad0182b8",
+            "M\u00eas Alvo": "2026-03",
+            "Categoria": "Lazer & Rol\u00ea",
+            "Novo Teto": 150.0
+        }
+    ]
+}
