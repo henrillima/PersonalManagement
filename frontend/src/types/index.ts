@@ -14,6 +14,7 @@ export interface Frente {
   id: string;
   nome: string;
   cor: string;
+  categoria: Categoria | null;
   criado_em: string;
 }
 

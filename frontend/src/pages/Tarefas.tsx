@@ -9,7 +9,10 @@ import {
   SortableContext, useSortable, verticalListSortingStrategy, arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Plus, Trash2, GripVertical, Clock, Archive, RotateCcw } from "lucide-react";
+import {
+  Plus, Trash2, GripVertical, Clock, Archive, RotateCcw,
+  Settings, ChevronDown, ChevronRight, Pencil, Check, X,
+} from "lucide-react";
 import { apiFetch, fmtDate } from "@/lib/api";
 import type { Tarefa, Frente, TarefaStatus, Prioridade, Categoria } from "@/types";
 import { Button } from "@/components/ui/button";
@@ -82,17 +85,19 @@ function tarefaToForm(t: Tarefa): TarefaForm {
 export default function Tarefas() {
   const qc = useQueryClient();
 
-  const [catTab, setCatTab]         = useState<CatTab>("Pessoal");
+  const [catTab, setCatTab]             = useState<CatTab>("Pessoal");
   const [frenteFilter, setFrenteFilter] = useState("all");
   const [priorFilter, setPriorFilter]   = useState<Prioridade | "all">("all");
-  const [taskOpen, setTaskOpen]     = useState(false);
-  const [editing, setEditing]       = useState<Tarefa | null>(null);
-  const [form, setForm]             = useState<TarefaForm>(emptyForm());
-  const [frenteOpen, setFrenteOpen] = useState(false);
-  const [frenteNome, setFrenteNome] = useState("");
-  const [frenteCor, setFrenteCor]   = useState("#C8DA2D");
-  const [localTasks, setLocalTasks] = useState<Tarefa[]>([]);
-  const [activeTask, setActiveTask] = useState<Tarefa | null>(null);
+  const [taskOpen, setTaskOpen]         = useState(false);
+  const [editing, setEditing]           = useState<Tarefa | null>(null);
+  const [form, setForm]                 = useState<TarefaForm>(emptyForm());
+  const [projetoOpen, setProjetoOpen]   = useState(false);
+  const [projetoNome, setProjetoNome]   = useState("");
+  const [projetoCor, setProjetoCor]     = useState("#C8DA2D");
+  const [projetoCat, setProjetoCat]     = useState<Categoria>("Pessoal");
+  const [localTasks, setLocalTasks]     = useState<Tarefa[]>([]);
+  const [activeTask, setActiveTask]     = useState<Tarefa | null>(null);
+  const [manageOpen, setManageOpen]     = useState(false);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
@@ -115,31 +120,37 @@ export default function Tarefas() {
 
   useEffect(() => { setLocalTasks(tarefas); }, [tarefas]);
 
+  useEffect(() => {
+    setFrenteFilter("all");
+    if (catTab !== "arquivo") setProjetoCat(catTab);
+  }, [catTab]);
+
   // ── Mutations ──────────────────────────────────────────────────────────────
-  const invalidate = () => {
+  const invalidateTarefas = () => {
     qc.invalidateQueries({ queryKey: ["tarefas"] });
     qc.invalidateQueries({ queryKey: ["tarefas-arquivo"] });
   };
+  const invalidateFrente = () => qc.invalidateQueries({ queryKey: ["frentes"] });
 
   const createTarefa = useMutation({
     mutationFn: (d: object) => apiFetch("/api/v1/tarefas", { method: "POST", body: JSON.stringify(d) }),
-    onSuccess: () => { invalidate(); setTaskOpen(false); },
+    onSuccess: () => { invalidateTarefas(); setTaskOpen(false); },
   });
 
   const updateTarefa = useMutation({
     mutationFn: ({ id, d }: { id: string; d: object }) =>
       apiFetch(`/api/v1/tarefas/${id}`, { method: "PATCH", body: JSON.stringify(d) }),
-    onSuccess: invalidate,
+    onSuccess: invalidateTarefas,
   });
 
   const deleteTarefa = useMutation({
     mutationFn: (id: string) => apiFetch(`/api/v1/tarefas/${id}`, { method: "DELETE" }),
-    onSuccess: invalidate,
+    onSuccess: invalidateTarefas,
   });
 
   const restaurarMutation = useMutation({
     mutationFn: (id: string) => apiFetch(`/api/v1/tarefas/${id}/restaurar`, { method: "POST" }),
-    onSuccess: invalidate,
+    onSuccess: invalidateTarefas,
   });
 
   const reorderMutation = useMutation({
@@ -148,15 +159,32 @@ export default function Tarefas() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["tarefas"] }),
   });
 
-  const createFrente = useMutation({
+  const createProjeto = useMutation({
     mutationFn: (d: object) => apiFetch("/api/v1/frentes", { method: "POST", body: JSON.stringify(d) }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["frentes"] });
-      setFrenteOpen(false); setFrenteNome(""); setFrenteCor("#C8DA2D");
+      invalidateFrente();
+      setProjetoOpen(false); setProjetoNome(""); setProjetoCor("#C8DA2D");
     },
   });
 
+  const updateProjeto = useMutation({
+    mutationFn: ({ id, d }: { id: string; d: object }) =>
+      apiFetch(`/api/v1/frentes/${id}`, { method: "PATCH", body: JSON.stringify(d) }),
+    onSuccess: () => { invalidateFrente(); invalidateTarefas(); },
+  });
+
+  const deleteProjeto = useMutation({
+    mutationFn: (id: string) => apiFetch(`/api/v1/frentes/${id}`, { method: "DELETE" }),
+    onSuccess: () => { invalidateFrente(); invalidateTarefas(); },
+  });
+
   // ── Computed ───────────────────────────────────────────────────────────────
+  // Projetos da aba ativa (null categoria = legado, aparece em todas)
+  const projetosForTab = useMemo(
+    () => catTab === "arquivo" ? frentes : frentes.filter(f => !f.categoria || f.categoria === catTab),
+    [frentes, catTab]
+  );
+
   const catTasks = useMemo(
     () => localTasks.filter(t => !t.arquivado && t.categoria === catTab),
     [localTasks, catTab]
@@ -200,10 +228,9 @@ export default function Tarefas() {
 
     const isOverCol   = COLUMNS.some(c => c.id === overId);
     const overCard    = !isOverCol ? localTasks.find(t => t.id === overId) : null;
-    const finalStatus = drag.status; // já atualizado pelo handleDragOver
+    const finalStatus = drag.status;
     const crossCol    = orig.status !== finalStatus;
 
-    // Reordenação dentro da mesma coluna
     if (!crossCol && !isOverCol && overCard && activeId !== overId) {
       const col     = getColVisible(finalStatus);
       const oldIdx  = col.findIndex(t => t.id === activeId);
@@ -219,7 +246,6 @@ export default function Tarefas() {
       }
     }
 
-    // Mudança de coluna: persiste o novo status
     if (crossCol) {
       const targetLen = tarefas.filter(t =>
         t.status === finalStatus && !t.arquivado && t.categoria === drag.categoria
@@ -234,6 +260,11 @@ export default function Tarefas() {
     setEditing(null); setForm(emptyForm(cat)); setTaskOpen(true);
   }
   function openEdit(t: Tarefa) { setEditing(t); setForm(tarefaToForm(t)); setTaskOpen(true); }
+
+  function openNovoProjeto(cat?: Categoria) {
+    const c = cat ?? (catTab === "arquivo" ? "Pessoal" : catTab as Categoria);
+    setProjetoCat(c); setProjetoNome(""); setProjetoCor("#C8DA2D"); setProjetoOpen(true);
+  }
 
   function handleSave() {
     if (!form.titulo.trim()) return;
@@ -263,12 +294,12 @@ export default function Tarefas() {
         <div>
           <h1 className="text-2xl font-semibold">Tarefas</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {totalAtivas} pendentes · {frentes.length} frentes
+            {totalAtivas} pendentes · {frentes.length} projetos
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => setFrenteOpen(true)}>
-            <Plus size={14} className="mr-1" /> Nova Frente
+          <Button variant="outline" size="sm" onClick={() => openNovoProjeto()}>
+            <Plus size={14} className="mr-1" /> Novo Projeto
           </Button>
           <Button size="sm" onClick={openCreate} className="bg-[#C8DA2D] text-[#0C1923] hover:bg-[#d4e640]">
             <Plus size={14} className="mr-1" /> Nova Tarefa
@@ -315,8 +346,8 @@ export default function Tarefas() {
         <>
           {/* Filters */}
           <div className="flex gap-1.5 flex-wrap">
-            <FilterPill active={frenteFilter === "all"} onClick={() => setFrenteFilter("all")}>Todas as frentes</FilterPill>
-            {frentes.map(f => (
+            <FilterPill active={frenteFilter === "all"} onClick={() => setFrenteFilter("all")}>Todos os projetos</FilterPill>
+            {projetosForTab.map(f => (
               <FilterPill key={f.id} active={frenteFilter === f.id} color={f.cor}
                 onClick={() => setFrenteFilter(frenteFilter === f.id ? "all" : f.id)}>
                 {f.nome}
@@ -407,7 +438,8 @@ export default function Tarefas() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label>Categoria</Label>
-                <Select value={form.categoria} onValueChange={v => setForm(f => ({ ...f, categoria: v as Categoria }))}>
+                <Select value={form.categoria}
+                  onValueChange={v => setForm(f => ({ ...f, categoria: v as Categoria, frente_id: "" }))}>
                   <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {CATEGORIES.map(c => <SelectItem key={c.id} value={c.id}>{c.emoji} {c.id}</SelectItem>)}
@@ -438,27 +470,33 @@ export default function Tarefas() {
                 </Select>
               </div>
               <div>
-                <Label>Frente</Label>
-                <Select value={form.frente_id || "none"} onValueChange={v => setForm(f => ({ ...f, frente_id: v === "none" ? "" : v }))}>
-                  <SelectTrigger className="mt-1"><SelectValue placeholder="Sem frente" /></SelectTrigger>
+                <Label>Projeto</Label>
+                <Select value={form.frente_id || "none"}
+                  onValueChange={v => setForm(f => ({ ...f, frente_id: v === "none" ? "" : v }))}>
+                  <SelectTrigger className="mt-1"><SelectValue placeholder="Sem projeto" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">Sem frente</SelectItem>
-                    {frentes.map(fr => <SelectItem key={fr.id} value={fr.id}>{fr.nome}</SelectItem>)}
+                    <SelectItem value="none">Sem projeto</SelectItem>
+                    {frentes
+                      .filter(fr => !fr.categoria || fr.categoria === form.categoria)
+                      .map(fr => <SelectItem key={fr.id} value={fr.id}>{fr.nome}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
             </div>
             <div>
               <Label>Data limite</Label>
-              <Input type="date" value={form.data_limite} onChange={e => setForm(f => ({ ...f, data_limite: e.target.value }))} className="mt-1" />
+              <Input type="date" value={form.data_limite}
+                onChange={e => setForm(f => ({ ...f, data_limite: e.target.value }))} className="mt-1" />
             </div>
             <div>
               <Label>Descrição</Label>
-              <Textarea value={form.descricao} onChange={e => setForm(f => ({ ...f, descricao: e.target.value }))} rows={3} className="mt-1" />
+              <Textarea value={form.descricao}
+                onChange={e => setForm(f => ({ ...f, descricao: e.target.value }))} rows={3} className="mt-1" />
             </div>
             <div>
               <Label>Observações</Label>
-              <Textarea value={form.observacao} onChange={e => setForm(f => ({ ...f, observacao: e.target.value }))} rows={2} className="mt-1" />
+              <Textarea value={form.observacao}
+                onChange={e => setForm(f => ({ ...f, observacao: e.target.value }))} rows={2} className="mt-1" />
             </div>
             {editing && (
               <div className="pt-2 border-t flex items-center justify-between">
@@ -488,35 +526,159 @@ export default function Tarefas() {
         </DialogContent>
       </Dialog>
 
-      {/* Frente dialog */}
-      <Dialog open={frenteOpen} onOpenChange={setFrenteOpen}>
+      {/* Projeto dialog */}
+      <Dialog open={projetoOpen} onOpenChange={setProjetoOpen}>
         <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle>Nova Frente</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Novo Projeto</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
             <div>
+              <Label>Categoria</Label>
+              <Select value={projetoCat} onValueChange={v => setProjetoCat(v as Categoria)}>
+                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {CATEGORIES.map(c => <SelectItem key={c.id} value={c.id}>{c.emoji} {c.id}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
               <Label>Nome</Label>
-              <Input value={frenteNome} onChange={e => setFrenteNome(e.target.value)}
-                placeholder="Ex: Pessoal, Estudos, ITA..." className="mt-1" />
+              <Input value={projetoNome} onChange={e => setProjetoNome(e.target.value)}
+                placeholder="Ex: Cálculo, Lazer, Deals..." className="mt-1" />
             </div>
             <div>
               <Label>Cor</Label>
               <div className="flex items-center gap-3 mt-1">
-                <input type="color" value={frenteCor} onChange={e => setFrenteCor(e.target.value)}
+                <input type="color" value={projetoCor} onChange={e => setProjetoCor(e.target.value)}
                   className="w-10 h-10 rounded-md border cursor-pointer" />
-                <span className="text-sm text-muted-foreground font-mono">{frenteCor}</span>
+                <span className="text-sm text-muted-foreground font-mono">{projetoCor}</span>
               </div>
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setFrenteOpen(false)}>Cancelar</Button>
-            <Button onClick={() => createFrente.mutate({ nome: frenteNome, cor: frenteCor })}
-              disabled={!frenteNome.trim() || createFrente.isPending}
+            <Button variant="outline" onClick={() => setProjetoOpen(false)}>Cancelar</Button>
+            <Button
+              onClick={() => createProjeto.mutate({ nome: projetoNome, cor: projetoCor, categoria: projetoCat })}
+              disabled={!projetoNome.trim() || createProjeto.isPending}
               className="bg-[#C8DA2D] text-[#0C1923] hover:bg-[#d4e640]">
               Criar
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Gerenciar Projetos */}
+      <div className="border border-border rounded-xl overflow-hidden">
+        <button
+          onClick={() => setManageOpen(v => !v)}
+          className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium hover:bg-muted/50 transition-colors"
+        >
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <Settings size={14} />
+            <span>Gerenciar Projetos</span>
+          </div>
+          {manageOpen
+            ? <ChevronDown size={14} className="text-muted-foreground" />
+            : <ChevronRight size={14} className="text-muted-foreground" />}
+        </button>
+        {manageOpen && (
+          <GerenciarProjetos
+            frentes={frentes}
+            onUpdate={(id, d) => updateProjeto.mutate({ id, d })}
+            onDelete={id => deleteProjeto.mutate(id)}
+            onNew={cat => openNovoProjeto(cat)}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── GerenciarProjetos ──────────────────────────────────────────────────────────
+
+function GerenciarProjetos({ frentes, onUpdate, onDelete, onNew }: {
+  frentes: Frente[];
+  onUpdate: (id: string, d: object) => void;
+  onDelete: (id: string) => void;
+  onNew: (cat: Categoria) => void;
+}) {
+  const [editId, setEditId]     = useState<string | null>(null);
+  const [editNome, setEditNome] = useState("");
+  const [editCor, setEditCor]   = useState("");
+
+  function startEdit(f: Frente) {
+    setEditId(f.id); setEditNome(f.nome); setEditCor(f.cor);
+  }
+
+  function saveEdit() {
+    if (editId) { onUpdate(editId, { nome: editNome, cor: editCor }); setEditId(null); }
+  }
+
+  return (
+    <div className="border-t border-border divide-y divide-border">
+      {CATEGORIES.map(cat => {
+        const catProjs = frentes.filter(f => !f.categoria || f.categoria === cat.id);
+        return (
+          <div key={cat.id} className="px-4 py-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                {cat.emoji} {cat.id}
+              </span>
+              <button
+                onClick={() => onNew(cat.id)}
+                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <Plus size={11} /> Adicionar
+              </button>
+            </div>
+            {catProjs.length === 0 ? (
+              <p className="text-xs text-muted-foreground italic">Nenhum projeto criado.</p>
+            ) : (
+              <div className="space-y-1">
+                {catProjs.map(f => (
+                  <div key={f.id} className="flex items-center gap-2 group py-1">
+                    {editId === f.id ? (
+                      <>
+                        <input type="color" value={editCor} onChange={e => setEditCor(e.target.value)}
+                          className="w-6 h-6 rounded cursor-pointer shrink-0 border" />
+                        <Input
+                          value={editNome}
+                          onChange={e => setEditNome(e.target.value)}
+                          className="h-7 text-xs flex-1"
+                          onKeyDown={e => {
+                            if (e.key === "Enter") saveEdit();
+                            if (e.key === "Escape") setEditId(null);
+                          }}
+                        />
+                        <button onClick={saveEdit} className="p-1 text-green-500 hover:text-green-600 transition-colors">
+                          <Check size={13} />
+                        </button>
+                        <button onClick={() => setEditId(null)} className="p-1 text-muted-foreground hover:text-foreground transition-colors">
+                          <X size={13} />
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: f.cor }} />
+                        <span className="text-sm flex-1">{f.nome}</span>
+                        <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button onClick={() => startEdit(f)}
+                            className="p-1 text-muted-foreground hover:text-foreground transition-colors">
+                            <Pencil size={11} />
+                          </button>
+                          <button onClick={() => onDelete(f.id)}
+                            className="p-1 text-muted-foreground hover:text-red-500 transition-colors">
+                            <Trash2 size={11} />
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -558,7 +720,6 @@ function CardContent({ tarefa, overlay, dragListeners, onEdit, onDelete, onStatu
       )}
     >
       <div className="flex items-start gap-1.5">
-        {/* Drag handle */}
         <div
           {...(!overlay ? dragListeners : {})}
           onClick={e => e.stopPropagation()}
@@ -568,7 +729,6 @@ function CardContent({ tarefa, overlay, dragListeners, onEdit, onDelete, onStatu
         </div>
 
         <div className="flex-1 min-w-0">
-          {/* Badges */}
           <div className="flex flex-wrap gap-1 mb-1.5">
             {prioridade && (
               <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded"

@@ -12,10 +12,12 @@ router = APIRouter(tags=["tarefas"])
 class FrenteCreate(BaseModel):
     nome: str
     cor: str = "#94a3b8"
+    categoria: Optional[str] = None
 
 class FrenteUpdate(BaseModel):
     nome: Optional[str] = None
     cor: Optional[str] = None
+    categoria: Optional[str] = None
 
 
 @router.get("/frentes")
