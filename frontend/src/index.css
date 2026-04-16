@@ -1,0 +1,128 @@
+/* Importação da tipografia oficial da marca (Brandbook Pág 31) */
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Garante que a raiz do React ocupe 100% da tela sempre */
+#root {
+  width: 100%;
+  min-height: 100vh;
+}
+
+@layer base {
+  :root {
+    /* PALETA MADCAP OFICIAL */
+    --madcap-lime: 66 70% 52%; /* #C8DA20 */
+    --madcap-dark: 206 49% 9%; /* #0C1923 */
+
+    /* CORES ESTRUTURAIS DO SITE */
+    --background: 0 0% 100%;
+    --foreground: var(--madcap-dark);
+
+    --card: 0 0% 100%;
+    --card-foreground: var(--madcap-dark);
+
+    --popover: 0 0% 100%;
+    --popover-foreground: var(--madcap-dark);
+
+    --primary: var(--madcap-dark); 
+    --primary-foreground: 0 0% 100%; 
+
+    --secondary: var(--madcap-lime);
+    --secondary-foreground: var(--madcap-dark); 
+
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 40%;
+
+    --accent: var(--madcap-lime);
+    --accent-foreground: var(--madcap-dark);
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 0 0% 90%;
+    --input: 0 0% 90%;
+    --ring: var(--madcap-lime);
+
+    --radius: 0.5rem;
+
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .dark {
+    --background: var(--madcap-dark);
+    --foreground: 0 0% 100%;
+    --card: 206 49% 7%;
+    --card-foreground: 0 0% 100%;
+    --popover: var(--madcap-dark);
+    --popover-foreground: 0 0% 100%;
+    --primary: var(--madcap-lime);
+    --primary-foreground: var(--madcap-dark);
+    --secondary: 0 0% 20%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 0 0% 20%;
+    --muted-foreground: 0 0% 70%;
+    --accent: var(--madcap-lime);
+    --accent-foreground: var(--madcap-dark);
+    --border: 0 0% 20%;
+    --input: 0 0% 20%;
+    --ring: var(--madcap-lime);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    font-family: 'Montserrat', sans-serif;
+    @apply bg-background text-foreground overflow-x-hidden;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+/* ── Print styles ────────────────────────────────────────────────────────── */
+@media print {
+  /* Hide sidebar and nav */
+  aside {
+    display: none !important;
+  }
+
+  /* Reset height constraints so full report is visible */
+  html,
+  body,
+  #root {
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  /* Unwrap the flex layout */
+  .flex.h-screen {
+    display: block !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  main {
+    overflow: visible !important;
+    height: auto !important;
+  }
+
+  /* Page margins */
+  @page {
+    margin: 20mm 15mm;
+  }
+}
