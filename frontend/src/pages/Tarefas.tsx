@@ -181,7 +181,7 @@ export default function Tarefas() {
   // ── Computed ───────────────────────────────────────────────────────────────
   // Projetos da aba ativa (null categoria = legado, aparece em todas)
   const projetosForTab = useMemo(
-    () => catTab === "arquivo" ? frentes : frentes.filter(f => !f.categoria || f.categoria === catTab),
+    () => catTab === "arquivo" ? frentes : frentes.filter(f => f.categoria === catTab),
     [frentes, catTab]
   );
 
@@ -477,7 +477,7 @@ export default function Tarefas() {
                   <SelectContent>
                     <SelectItem value="none">Sem projeto</SelectItem>
                     {frentes
-                      .filter(fr => !fr.categoria || fr.categoria === form.categoria)
+                      .filter(fr => fr.categoria === form.categoria)
                       .map(fr => <SelectItem key={fr.id} value={fr.id}>{fr.nome}</SelectItem>)}
                   </SelectContent>
                 </Select>
@@ -616,7 +616,7 @@ function GerenciarProjetos({ frentes, onUpdate, onDelete, onNew }: {
   return (
     <div className="border-t border-border divide-y divide-border">
       {CATEGORIES.map(cat => {
-        const catProjs = frentes.filter(f => !f.categoria || f.categoria === cat.id);
+        const catProjs = frentes.filter(f => f.categoria === cat.id);
         return (
           <div key={cat.id} className="px-4 py-3">
             <div className="flex items-center justify-between mb-2">
