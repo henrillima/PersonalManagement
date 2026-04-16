@@ -17,6 +17,8 @@ export interface Frente {
   criado_em: string;
 }
 
+export type Categoria = "Pessoal" | "Faculdade" | "Trabalho";
+
 export interface Tarefa {
   id: string;
   titulo: string;
@@ -24,13 +26,28 @@ export interface Tarefa {
   frente_id: string | null;
   frente_nome: string | null;
   frente_cor: string | null;
+  categoria: Categoria;
   prioridade: Prioridade;
   status: TarefaStatus;
-  data_limite: string | null; // YYYY-MM-DD
+  ordem: number;
+  data_limite: string | null;
   observacao: string | null;
   concluida: boolean;
+  arquivado: boolean;
+  tipo_arquivo: "engavetada" | "arquivo" | null;
   criado_em: string;
   atualizado_em: string;
+}
+
+export interface ListaComprasItem {
+  id: string;
+  nome: string;
+  quantidade: number;
+  unidade: string;
+  valor_esperado: number | null;
+  categoria: string | null;
+  comprado: boolean;
+  criado_em: string;
 }
 
 // ── Financeiro: Caixa ────────────────────────────────────────────────────────

@@ -13,6 +13,7 @@ import Investimentos from "@/pages/Financeiro/Investimentos";
 import Terceiros from "@/pages/Financeiro/Terceiros";
 import Pendencias from "@/pages/Financeiro/Pendencias";
 import Saude from "@/pages/Saude";
+import ListaCompras from "@/pages/ListaCompras";
 
 function AuthGuard() {
   const token = localStorage.getItem("token");
@@ -42,6 +43,7 @@ export default function App() {
               <Route path="pendencias"     element={<Pendencias />} />
             </Route>
             <Route path="saude" element={<Saude />} />
+            <Route path="lista-compras" element={<ListaCompras />} />
           </Route>
         </Route>
       </Routes>

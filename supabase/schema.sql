@@ -13,18 +13,27 @@ CREATE TABLE IF NOT EXISTS frentes (
 );
 
 CREATE TABLE IF NOT EXISTS tarefas (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  titulo      TEXT NOT NULL,
-  descricao   TEXT,
-  frente_id   UUID REFERENCES frentes(id) ON DELETE SET NULL,
-  prioridade  TEXT NOT NULL DEFAULT 'media', -- alta | media | baixa
-  status      TEXT NOT NULL DEFAULT 'todo',  -- todo | in_progress | done | blocked
-  data_limite DATE,
-  observacao  TEXT,
-  concluida   BOOLEAN NOT NULL DEFAULT FALSE,
-  criado_em   TIMESTAMPTZ DEFAULT NOW(),
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  titulo        TEXT NOT NULL,
+  descricao     TEXT,
+  frente_id     UUID REFERENCES frentes(id) ON DELETE SET NULL,
+  categoria     TEXT NOT NULL DEFAULT 'Pessoal', -- Pessoal | Faculdade | Trabalho
+  prioridade    TEXT NOT NULL DEFAULT 'media',   -- alta | media | baixa
+  status        TEXT NOT NULL DEFAULT 'todo',    -- todo | in_progress | done | blocked
+  ordem         INT NOT NULL DEFAULT 0,
+  data_limite   DATE,
+  observacao    TEXT,
+  concluida     BOOLEAN NOT NULL DEFAULT FALSE,
+  arquivado     BOOLEAN NOT NULL DEFAULT FALSE,
+  tipo_arquivo  TEXT,                            -- engavetada | arquivo
+  criado_em     TIMESTAMPTZ DEFAULT NOW(),
   atualizado_em TIMESTAMPTZ DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_tarefas_status    ON tarefas(status);
+CREATE INDEX IF NOT EXISTS idx_tarefas_categoria ON tarefas(categoria);
+CREATE INDEX IF NOT EXISTS idx_tarefas_arquivado ON tarefas(arquivado);
+CREATE INDEX IF NOT EXISTS idx_tarefas_ordem     ON tarefas(categoria, status, ordem);
 
 -- ── FINANCEIRO: CONTAS E CAIXA ────────────────────────────────
 
@@ -48,7 +57,7 @@ CREATE INDEX IF NOT EXISTS idx_caixa_data ON caixa_snapshots(data DESC);
 
 CREATE TABLE IF NOT EXISTS faturas_cartoes (
   cartao      TEXT PRIMARY KEY,
-  vencimento  INTEGER NOT NULL -- dia do mês
+  vencimento  INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS faturas (
@@ -71,7 +80,7 @@ CREATE TABLE IF NOT EXISTS fluxos_recorrentes (
   dia         INTEGER NOT NULL,
   valor       NUMERIC(12,2) NOT NULL,
   inicio      TEXT NOT NULL, -- YYYY-MM
-  fim         TEXT,          -- YYYY-MM or NULL (ativo indefinidamente)
+  fim         TEXT,          -- YYYY-MM or NULL
   criado_em   TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -79,7 +88,7 @@ CREATE TABLE IF NOT EXISTS fluxos_recorrentes (
 
 CREATE TABLE IF NOT EXISTS fluxos_pontuais (
   id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tipo      TEXT NOT NULL, -- Receita | Despesa
+  tipo      TEXT NOT NULL,
   categoria TEXT NOT NULL,
   descricao TEXT NOT NULL,
   dia       INTEGER NOT NULL,
@@ -94,7 +103,7 @@ CREATE INDEX IF NOT EXISTS idx_pontuais_mes ON fluxos_pontuais(mes_alvo);
 
 CREATE TABLE IF NOT EXISTS gastos_variaveis (
   id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  mes       TEXT NOT NULL, -- YYYY-MM
+  mes       TEXT NOT NULL,
   dia       INTEGER NOT NULL,
   categoria TEXT NOT NULL,
   descricao TEXT NOT NULL,
@@ -108,7 +117,7 @@ CREATE TABLE IF NOT EXISTS orcamento (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   categoria   TEXT NOT NULL,
   teto        NUMERIC(12,2) NOT NULL,
-  mes_excecao TEXT, -- YYYY-MM se exceção; NULL se regra base
+  mes_excecao TEXT,
   UNIQUE(categoria, mes_excecao)
 );
 
@@ -116,7 +125,7 @@ CREATE TABLE IF NOT EXISTS orcamento (
 
 CREATE TABLE IF NOT EXISTS aportes (
   id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  mes       TEXT NOT NULL,   -- YYYY-MM
+  mes       TEXT NOT NULL,
   dia       INTEGER NOT NULL,
   classe    TEXT NOT NULL,
   ativo     TEXT NOT NULL,
@@ -127,13 +136,13 @@ CREATE TABLE IF NOT EXISTS aportes (
 CREATE INDEX IF NOT EXISTS idx_aportes_mes ON aportes(mes);
 
 CREATE TABLE IF NOT EXISTS plano_investimento (
-  id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tipo     TEXT NOT NULL,   -- estrutural | tatico
-  classe   TEXT NOT NULL,
-  valor    NUMERIC(12,2) NOT NULL,
-  mes_alvo TEXT,            -- YYYY-MM (apenas para táticos)
+  id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tipo      TEXT NOT NULL,
+  classe    TEXT NOT NULL,
+  valor     NUMERIC(12,2) NOT NULL,
+  mes_alvo  TEXT,
   criado_em TIMESTAMPTZ DEFAULT NOW(),
-  UNIQUE(tipo, classe, mes_alvo) -- evita duplicatas estruturais
+  UNIQUE(tipo, classe, mes_alvo)
 );
 
 -- ── FINANCEIRO: TERCEIROS ─────────────────────────────────────
@@ -141,9 +150,9 @@ CREATE TABLE IF NOT EXISTS plano_investimento (
 CREATE TABLE IF NOT EXISTS terceiros (
   id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   pessoa    TEXT NOT NULL,
-  origem    TEXT NOT NULL, -- pix | cartao
+  origem    TEXT NOT NULL,
   descricao TEXT NOT NULL,
-  mes_alvo  TEXT NOT NULL, -- YYYY-MM
+  mes_alvo  TEXT NOT NULL,
   dia       INTEGER NOT NULL,
   valor     NUMERIC(12,2) NOT NULL,
   recebido  BOOLEAN NOT NULL DEFAULT FALSE,
@@ -156,7 +165,7 @@ CREATE TABLE IF NOT EXISTS dividas (
   id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   descricao TEXT NOT NULL,
   valor     NUMERIC(12,2) NOT NULL,
-  mes       TEXT NOT NULL, -- YYYY-MM
+  mes       TEXT NOT NULL,
   dia       INTEGER NOT NULL,
   pago      BOOLEAN NOT NULL DEFAULT FALSE,
   criado_em TIMESTAMPTZ DEFAULT NOW()
@@ -165,15 +174,14 @@ CREATE TABLE IF NOT EXISTS dividas (
 -- ── SAÚDE ─────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS saude_perfil (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  idade       INTEGER,
-  altura      NUMERIC(5,2), -- cm
-  sexo        TEXT,          -- M | F
-  fator_idx   INTEGER DEFAULT 3, -- 1-5 (sedentário → muito ativo)
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  idade         INTEGER,
+  altura        NUMERIC(5,2),
+  sexo          TEXT,
+  fator_idx     INTEGER DEFAULT 3,
   atualizado_em TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Garante somente 1 linha de perfil
 CREATE UNIQUE INDEX IF NOT EXISTS idx_saude_perfil_single ON saude_perfil((TRUE));
 
 CREATE TABLE IF NOT EXISTS saude_peso (
@@ -207,3 +215,18 @@ CREATE TABLE IF NOT EXISTS saude_treino (
 );
 
 CREATE INDEX IF NOT EXISTS idx_treino_data ON saude_treino(data DESC);
+
+-- ── LISTA DE COMPRAS ──────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS lista_compras (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  nome           TEXT NOT NULL,
+  quantidade     NUMERIC(8,2) NOT NULL DEFAULT 1,
+  unidade        TEXT NOT NULL DEFAULT 'un',
+  valor_esperado NUMERIC(10,2),
+  categoria      TEXT,
+  comprado       BOOLEAN NOT NULL DEFAULT FALSE,
+  criado_em      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_compras_comprado ON lista_compras(comprado);

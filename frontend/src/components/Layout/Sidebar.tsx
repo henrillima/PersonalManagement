@@ -13,6 +13,7 @@ import {
   Users,
   AlertTriangle,
   Heart,
+  ShoppingBag,
   LogOut,
   ChevronDown,
 } from "lucide-react";
@@ -131,6 +132,17 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
             </div>
           )}
         </div>
+
+        <NavLink
+          to="/lista-compras"
+          className={({ isActive }) =>
+            cn("flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+              isActive ? "bg-[#C8DA2D] text-[#0C1923]" : "text-white/60 hover:text-white hover:bg-white/8")
+          }
+        >
+          <ShoppingBag size={16} />
+          Lista de Compras
+        </NavLink>
 
         <NavLink
           to="/saude"
