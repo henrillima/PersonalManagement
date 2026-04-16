@@ -1,0 +1,55 @@
+# ── Segredos e credenciais ────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.cer
+*.crt
+credentials.json
+secrets.json
+serviceAccountKey.json
+*_credentials.json
+*_secrets.json
+
+# ── Python (backend) ──────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+*.db
+*.sqlite3
+
+# ── Node / Frontend ───────────────────────────────────────────────────────────
+node_modules/
+dist/
+build/
+.parcel-cache/
+*.local
+
+# ── Supabase ──────────────────────────────────────────────────────────────────
+supabase/.temp/
+supabase/.branches/
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Editores ──────────────────────────────────────────────────────────────────
+.idea/
+*.swp
+*.swo
+*.orig
