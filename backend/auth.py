@@ -5,7 +5,7 @@ from typing import Optional
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
-from passlib.hash import bcrypt
+import bcrypt as _bcrypt
 
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_DAYS = 30
@@ -41,6 +41,6 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(bearer)) ->
 def check_password(plain: str) -> bool:
     stored_hash = os.environ.get("ADMIN_PASSWORD_HASH", "")
     try:
-        return bcrypt.verify(plain, stored_hash)
+        return _bcrypt.checkpw(plain.encode(), stored_hash.encode())
     except Exception:
         return False
