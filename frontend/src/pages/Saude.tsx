@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Trash2, Settings } from "lucide-react";
+import { Plus, Trash2, Settings, Sparkles, Save } from "lucide-react";
 import { apiFetch, fmtDate } from "@/lib/api";
 import type { SaudePerfil, PesoEntry, DietaEntry, TreinoEntry } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -20,7 +21,9 @@ const FATOR_LABELS = [
   "5 - Extremamente ativo",
 ];
 
-const REFEICOES = ["Café da manhã", "Lanche da manhã", "Almoço", "Lanche da tarde", "Jantar", "Ceia"];
+const REFEICOES = ["Café da manhã", "Lanche da manhã", "Almoço", "Lanche da tarde", "Jantar", "Ceia", "Pré-treino", "Pós-treino"];
+
+const TODAY = new Date().toISOString().slice(0, 10);
 
 export default function Saude() {
   const qc = useQueryClient();
@@ -30,9 +33,9 @@ export default function Saude() {
   const [treinoOpen, setTreinoOpen] = useState(false);
 
   const [perfilForm, setPerfilForm] = useState({ idade: "", altura: "", sexo: "M", fator_idx: "3" });
-  const [pesoForm, setPesoForm]     = useState({ data: new Date().toISOString().slice(0, 10), peso: "" });
-  const [dietaForm, setDietaForm]   = useState({ data: new Date().toISOString().slice(0, 10), refeicao: "Almoço", descricao: "", calorias: "", proteina: "", carboidrato: "", gordura: "" });
-  const [treinoForm, setTreinoForm] = useState({ data: new Date().toISOString().slice(0, 10), descricao: "", gasto_calorico: "" });
+  const [pesoForm, setPesoForm]     = useState({ data: TODAY, peso: "" });
+  const [dietaForm, setDietaForm]   = useState({ data: TODAY, refeicao: "Almoço", descricao: "" });
+  const [treinoForm, setTreinoForm] = useState({ data: TODAY, descricao: "" });
 
   const { data: perfil, isLoading: lPerfil } = useQuery<SaudePerfil>({
     queryKey: ["saude-perfil"],
@@ -69,9 +72,14 @@ export default function Saude() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["saude-peso"] }),
   });
 
-  const createDieta = useMutation({
-    mutationFn: (d: object) => apiFetch("/api/v1/saude/dieta", { method: "POST", body: JSON.stringify(d) }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["saude-dieta"] }); setDietaOpen(false); },
+  // Registra refeição com análise de IA (endpoint /analisar)
+  const analisarDieta = useMutation({
+    mutationFn: (d: object) => apiFetch("/api/v1/saude/dieta/analisar", { method: "POST", body: JSON.stringify(d) }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["saude-dieta"] });
+      setDietaOpen(false);
+      setDietaForm({ data: TODAY, refeicao: "Almoço", descricao: "" });
+    },
   });
 
   const deleteDieta = useMutation({
@@ -79,9 +87,14 @@ export default function Saude() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["saude-dieta"] }),
   });
 
-  const createTreino = useMutation({
-    mutationFn: (d: object) => apiFetch("/api/v1/saude/treino", { method: "POST", body: JSON.stringify(d) }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["saude-treino"] }); setTreinoOpen(false); },
+  // Registra treino com estimativa de IA (endpoint /analisar)
+  const analisarTreino = useMutation({
+    mutationFn: (d: object) => apiFetch("/api/v1/saude/treino/analisar", { method: "POST", body: JSON.stringify(d) }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["saude-treino"] });
+      setTreinoOpen(false);
+      setTreinoForm({ data: TODAY, descricao: "" });
+    },
   });
 
   const deleteTreino = useMutation({
@@ -99,15 +112,25 @@ export default function Saude() {
     setPerfilOpen(true);
   }
 
-  // Compute today's totals from dieta
-  const today = new Date().toISOString().slice(0, 10);
-  const dietaHoje = dieta.filter((d) => d.data === today);
+  const dietaHoje = dieta.filter((d) => d.data === TODAY);
   const calHoje   = dietaHoje.reduce((s, d) => s + (d.calorias ?? 0), 0);
   const protHoje  = dietaHoje.reduce((s, d) => s + (d.proteina ?? 0), 0);
   const carbHoje  = dietaHoje.reduce((s, d) => s + (d.carboidrato ?? 0), 0);
   const gordHoje  = dietaHoje.reduce((s, d) => s + (d.gordura ?? 0), 0);
 
   const ultimoPeso = pesos[0];
+
+  // Metas calóricas baseadas no perfil (Mifflin-St Jeor)
+  const metaKcal = (() => {
+    if (!perfil?.idade || !perfil?.altura || !ultimoPeso?.peso) return null;
+    const peso = ultimoPeso.peso;
+    const tmb = perfil.sexo === "F"
+      ? 10 * peso + 6.25 * perfil.altura - 5 * perfil.idade - 161
+      : 10 * peso + 6.25 * perfil.altura - 5 * perfil.idade + 5;
+    const fatores = [1.2, 1.375, 1.55, 1.725, 1.9];
+    const fator = fatores[(perfil.fator_idx ?? 3) - 1] ?? 1.55;
+    return Math.round(tmb * fator - 300); // déficit leve
+  })();
 
   if (lPerfil) return <Skeleton className="h-64 rounded-xl" />;
 
@@ -132,12 +155,13 @@ export default function Saude() {
       {perfil && (perfil.idade || perfil.altura) ? (
         <div className="bg-card border border-border rounded-xl p-5">
           <h3 className="text-sm font-semibold mb-3">Perfil</h3>
-          <div className="flex gap-8 text-sm">
+          <div className="flex gap-8 text-sm flex-wrap">
             {perfil.idade && <div><p className="text-muted-foreground text-xs">Idade</p><p className="font-medium">{perfil.idade} anos</p></div>}
             {perfil.altura && <div><p className="text-muted-foreground text-xs">Altura</p><p className="font-medium">{perfil.altura} cm</p></div>}
             {ultimoPeso && <div><p className="text-muted-foreground text-xs">Peso atual</p><p className="font-medium">{ultimoPeso.peso} kg</p></div>}
             {perfil.sexo && <div><p className="text-muted-foreground text-xs">Sexo</p><p className="font-medium">{perfil.sexo === "M" ? "Masculino" : "Feminino"}</p></div>}
             {perfil.fator_idx && <div><p className="text-muted-foreground text-xs">Nível de atividade</p><p className="font-medium">{FATOR_LABELS[perfil.fator_idx - 1]?.split(" - ")[1]}</p></div>}
+            {metaKcal && <div><p className="text-muted-foreground text-xs">Meta calórica</p><p className="font-medium text-[#C8DA2D]">~{metaKcal} kcal/dia</p></div>}
           </div>
         </div>
       ) : null}
@@ -193,8 +217,11 @@ export default function Saude() {
         {/* Dieta tab */}
         <TabsContent value="dieta" className="space-y-4">
           <div className="flex items-center justify-between">
-            <div className="flex gap-4 text-sm">
-              <span className="text-muted-foreground">Calorias: <strong className="text-foreground">{calHoje} kcal</strong></span>
+            <div className="flex gap-4 text-sm flex-wrap">
+              <span className="text-muted-foreground">
+                Calorias: <strong className="text-foreground">{calHoje} kcal</strong>
+                {metaKcal && <span className="text-muted-foreground"> / {metaKcal}</span>}
+              </span>
               <span className="text-muted-foreground">Prot: <strong className="text-blue-400">{protHoje.toFixed(0)}g</strong></span>
               <span className="text-muted-foreground">Carb: <strong className="text-amber-400">{carbHoje.toFixed(0)}g</strong></span>
               <span className="text-muted-foreground">Gord: <strong className="text-red-400">{gordHoje.toFixed(0)}g</strong></span>
@@ -203,6 +230,25 @@ export default function Saude() {
               <Plus size={14} className="mr-1" /> Refeição
             </Button>
           </div>
+
+          {/* Barra de progresso calórico */}
+          {metaKcal && calHoje > 0 && (
+            <div className="space-y-1">
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>Progresso calórico</span>
+                <span>{Math.round((calHoje / metaKcal) * 100)}%</span>
+              </div>
+              <div className="h-2 bg-border rounded-full overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-all"
+                  style={{
+                    width: `${Math.min((calHoje / metaKcal) * 100, 100)}%`,
+                    backgroundColor: calHoje > metaKcal ? "#ef4444" : "#C8DA2D",
+                  }}
+                />
+              </div>
+            </div>
+          )}
 
           {lDieta ? <Skeleton className="h-32 rounded-xl" /> : dietaHoje.length === 0 ? (
             <div className="bg-card border border-border rounded-xl p-8 text-center text-muted-foreground text-sm">
@@ -213,12 +259,18 @@ export default function Saude() {
               {dietaHoje.map((d) => (
                 <div key={d.id} className="flex items-center gap-3 bg-card border border-border rounded-lg px-4 py-3">
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium">{d.refeicao}: {d.descricao}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {d.calorias} kcal · {d.proteina}g prot · {d.carboidrato}g carb · {d.gordura}g gord
+                    <p className="text-sm font-medium">{d.refeicao}: <span className="font-normal">{d.descricao}</span></p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      <span className="text-foreground font-medium">{d.calorias} kcal</span>
+                      {" · "}
+                      <span className="text-blue-400">{d.proteina}g prot</span>
+                      {" · "}
+                      <span className="text-amber-400">{d.carboidrato}g carb</span>
+                      {" · "}
+                      <span className="text-red-400">{d.gordura}g gord</span>
                     </p>
                   </div>
-                  <button onClick={() => deleteDieta.mutate(d.id)} className="text-muted-foreground hover:text-red-500 transition-colors"><Trash2 size={13} /></button>
+                  <button onClick={() => deleteDieta.mutate(d.id)} className="text-muted-foreground hover:text-red-500 transition-colors shrink-0"><Trash2 size={13} /></button>
                 </div>
               ))}
             </div>
@@ -242,9 +294,11 @@ export default function Saude() {
               {treinos.slice(0, 20).map((t) => (
                 <div key={t.id} className="flex items-center gap-3 bg-card border border-border rounded-lg px-4 py-3">
                   <span className="text-sm text-muted-foreground shrink-0">{fmtDate(t.data)}</span>
-                  <p className="flex-1 text-sm font-medium truncate">{t.descricao}</p>
-                  {t.gasto_calorico && <span className="text-sm text-amber-400 shrink-0">{t.gasto_calorico} kcal</span>}
-                  <button onClick={() => deleteTreino.mutate(t.id)} className="text-muted-foreground hover:text-red-500 transition-colors"><Trash2 size={13} /></button>
+                  <p className="flex-1 text-sm">{t.descricao}</p>
+                  {t.gasto_calorico != null && (
+                    <span className="text-sm font-medium text-amber-400 shrink-0">−{t.gasto_calorico} kcal</span>
+                  )}
+                  <button onClick={() => deleteTreino.mutate(t.id)} className="text-muted-foreground hover:text-red-500 transition-colors shrink-0"><Trash2 size={13} /></button>
                 </div>
               ))}
             </div>
@@ -283,7 +337,7 @@ export default function Saude() {
                 <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {FATOR_LABELS.map((l, i) => (
-                    <SelectItem key={i+1} value={String(i+1)}>{l}</SelectItem>
+                    <SelectItem key={i + 1} value={String(i + 1)}>{l}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -291,7 +345,16 @@ export default function Saude() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setPerfilOpen(false)}>Cancelar</Button>
-            <Button onClick={() => upsertPerfil.mutate({ idade: parseInt(perfilForm.idade) || undefined, altura: parseFloat(perfilForm.altura) || undefined, sexo: perfilForm.sexo, fator_idx: parseInt(perfilForm.fator_idx) })} disabled={upsertPerfil.isPending} className="bg-[#C8DA2D] text-[#0C1923] hover:bg-[#d4e640]">
+            <Button
+              onClick={() => upsertPerfil.mutate({
+                idade: parseInt(perfilForm.idade) || undefined,
+                altura: parseFloat(perfilForm.altura) || undefined,
+                sexo: perfilForm.sexo,
+                fator_idx: parseInt(perfilForm.fator_idx),
+              })}
+              disabled={upsertPerfil.isPending}
+              className="bg-[#C8DA2D] text-[#0C1923] hover:bg-[#d4e640]"
+            >
               Salvar
             </Button>
           </DialogFooter>
@@ -314,17 +377,26 @@ export default function Saude() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setPesoOpen(false)}>Cancelar</Button>
-            <Button onClick={() => createPeso.mutate({ data: pesoForm.data, peso: parseFloat(pesoForm.peso) })} disabled={!pesoForm.peso || createPeso.isPending} className="bg-[#C8DA2D] text-[#0C1923] hover:bg-[#d4e640]">
+            <Button
+              onClick={() => createPeso.mutate({ data: pesoForm.data, peso: parseFloat(pesoForm.peso) })}
+              disabled={!pesoForm.peso || createPeso.isPending}
+              className="bg-[#C8DA2D] text-[#0C1923] hover:bg-[#d4e640]"
+            >
               Salvar
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Dieta Dialog */}
-      <Dialog open={dietaOpen} onOpenChange={setDietaOpen}>
+      {/* Dieta Dialog — análise via IA */}
+      <Dialog open={dietaOpen} onOpenChange={(o) => { setDietaOpen(o); if (!o) setDietaForm({ data: TODAY, refeicao: "Almoço", descricao: "" }); }}>
         <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Registrar Refeição</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles size={16} className="text-[#C8DA2D]" />
+              Registrar Refeição com IA
+            </DialogTitle>
+          </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -342,65 +414,88 @@ export default function Saude() {
               </div>
             </div>
             <div>
-              <Label>Descrição</Label>
-              <Input value={dietaForm.descricao} onChange={(e) => setDietaForm((f) => ({ ...f, descricao: e.target.value }))} placeholder="O que você comeu?" className="mt-1" />
+              <Label>O que você comeu?</Label>
+              <Textarea
+                value={dietaForm.descricao}
+                onChange={(e) => setDietaForm((f) => ({ ...f, descricao: e.target.value }))}
+                placeholder="Ex: 150g de frango grelhado, 100g de arroz branco, 1 concha de feijão e salada à vontade."
+                className="mt-1 resize-none"
+                rows={3}
+              />
             </div>
-            <div className="grid grid-cols-4 gap-2">
-              {[
-                { key: "calorias", label: "kcal" },
-                { key: "proteina", label: "Prot (g)" },
-                { key: "carboidrato", label: "Carb (g)" },
-                { key: "gordura", label: "Gord (g)" },
-              ].map(({ key, label }) => (
-                <div key={key}>
-                  <Label className="text-xs">{label}</Label>
-                  <Input
-                    type="number" step="0.1"
-                    value={dietaForm[key as keyof typeof dietaForm]}
-                    onChange={(e) => setDietaForm((f) => ({ ...f, [key]: e.target.value }))}
-                    className="mt-1 h-8 text-sm"
-                  />
-                </div>
-              ))}
-            </div>
+            <p className="text-xs text-muted-foreground">
+              A IA (GPT-4o mini) vai estimar automaticamente calorias, proteínas, carboidratos e gorduras.
+            </p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDietaOpen(false)}>Cancelar</Button>
-            <Button onClick={() => createDieta.mutate({
-              data: dietaForm.data, refeicao: dietaForm.refeicao, descricao: dietaForm.descricao,
-              calorias: parseInt(dietaForm.calorias) || undefined,
-              proteina: parseFloat(dietaForm.proteina) || undefined,
-              carboidrato: parseFloat(dietaForm.carboidrato) || undefined,
-              gordura: parseFloat(dietaForm.gordura) || undefined,
-            })} disabled={!dietaForm.descricao || createDieta.isPending} className="bg-[#C8DA2D] text-[#0C1923] hover:bg-[#d4e640]">
-              Salvar
+            <Button
+              onClick={() => analisarDieta.mutate({ data: dietaForm.data, refeicao: dietaForm.refeicao, descricao: dietaForm.descricao })}
+              disabled={!dietaForm.descricao.trim() || analisarDieta.isPending}
+              className="bg-[#C8DA2D] text-[#0C1923] hover:bg-[#d4e640] gap-2"
+            >
+              {analisarDieta.isPending ? (
+                <>
+                  <span className="animate-spin inline-block w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full" />
+                  Analisando...
+                </>
+              ) : (
+                <>
+                  <Sparkles size={14} />
+                  Analisar e Salvar
+                </>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Treino Dialog */}
-      <Dialog open={treinoOpen} onOpenChange={setTreinoOpen}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle>Registrar Treino</DialogTitle></DialogHeader>
+      {/* Treino Dialog — estimativa via IA */}
+      <Dialog open={treinoOpen} onOpenChange={(o) => { setTreinoOpen(o); if (!o) setTreinoForm({ data: TODAY, descricao: "" }); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles size={16} className="text-[#C8DA2D]" />
+              Registrar Treino com IA
+            </DialogTitle>
+          </DialogHeader>
           <div className="space-y-4 py-2">
             <div>
               <Label>Data</Label>
               <Input type="date" value={treinoForm.data} onChange={(e) => setTreinoForm((f) => ({ ...f, data: e.target.value }))} className="mt-1" />
             </div>
             <div>
-              <Label>Descrição</Label>
-              <Input value={treinoForm.descricao} onChange={(e) => setTreinoForm((f) => ({ ...f, descricao: e.target.value }))} placeholder="Ex: Musculação A, Corrida 5km..." className="mt-1" />
+              <Label>O que você treinou?</Label>
+              <Textarea
+                value={treinoForm.descricao}
+                onChange={(e) => setTreinoForm((f) => ({ ...f, descricao: e.target.value }))}
+                placeholder="Ex: Musculação — costas e bíceps, 1h15. Exercícios: barra fixa 4x10, remada curvada 4x12, rosca direta 3x12."
+                className="mt-1 resize-none"
+                rows={3}
+              />
             </div>
-            <div>
-              <Label>Gasto calórico (kcal) — opcional</Label>
-              <Input type="number" value={treinoForm.gasto_calorico} onChange={(e) => setTreinoForm((f) => ({ ...f, gasto_calorico: e.target.value }))} placeholder="350" className="mt-1" />
-            </div>
+            <p className="text-xs text-muted-foreground">
+              A IA vai estimar o gasto calórico com base no seu peso atual ({ultimoPeso?.peso ?? 70} kg) e na descrição do treino.
+            </p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setTreinoOpen(false)}>Cancelar</Button>
-            <Button onClick={() => createTreino.mutate({ data: treinoForm.data, descricao: treinoForm.descricao, gasto_calorico: parseInt(treinoForm.gasto_calorico) || undefined })} disabled={!treinoForm.descricao || createTreino.isPending} className="bg-[#C8DA2D] text-[#0C1923] hover:bg-[#d4e640]">
-              Salvar
+            <Button
+              onClick={() => analisarTreino.mutate({ data: treinoForm.data, descricao: treinoForm.descricao, peso_atual: ultimoPeso?.peso })}
+              disabled={!treinoForm.descricao.trim() || analisarTreino.isPending}
+              className="bg-[#C8DA2D] text-[#0C1923] hover:bg-[#d4e640] gap-2"
+            >
+              {analisarTreino.isPending ? (
+                <>
+                  <span className="animate-spin inline-block w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full" />
+                  Estimando...
+                </>
+              ) : (
+                <>
+                  <Sparkles size={14} />
+                  Estimar e Salvar
+                </>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -15,5 +15,7 @@ services:
         sync: false
       - key: ADMIN_PASSWORD_HASH
         sync: false
+      - key: OPENAI_API_KEY
+        sync: false
       - key: ALLOWED_ORIGINS
         sync: false
