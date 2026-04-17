@@ -18,7 +18,24 @@ export interface Frente {
   criado_em: string;
 }
 
-export type Categoria = "Pessoal" | "Faculdade" | "Trabalho";
+export type Categoria = string;
+
+export interface CategoriaItem {
+  id: string;
+  nome: string;
+  emoji: string;
+  cor: string;
+  ordem: number;
+  criado_em: string;
+}
+
+export interface EventoAgenda {
+  id: string;
+  title: string;
+  start: string;
+  end: string;
+  description?: string;
+}
 
 export interface Tarefa {
   id: string;

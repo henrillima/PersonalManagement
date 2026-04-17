@@ -53,3 +53,21 @@ desktop.ini
 *.swp
 *.swo
 *.orig
+
+# Segredos
+.env
+.env.*
+!.env.example
+
+# Build
+dist/
+build/
+
+# Dependências
+node_modules/
+
+# Cache Vite
+.vite/
+*.local
+
+old_version_st/

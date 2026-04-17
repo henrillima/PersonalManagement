@@ -1,8 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch, fmtBRL, fmtDate } from "@/lib/api";
-import type { HomeResumo, TarefaResumo, DespesaResumo } from "@/types";
+import type { HomeResumo, TarefaResumo, DespesaResumo, EventoAgenda } from "@/types";
 import { cn } from "@/lib/utils";
-import { AlertTriangle, CalendarDays, Wallet, ArrowRight } from "lucide-react";
+import { AlertTriangle, CalendarDays, Wallet, ArrowRight, CalendarClock } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useNavigate } from "react-router-dom";
 
@@ -40,6 +40,17 @@ export default function Home() {
     queryKey: ["home-resumo"],
     queryFn: () => apiFetch("/api/v1/home/resumo"),
     refetchInterval: 60_000,
+  });
+
+  const hoje = new Date().toISOString().slice(0, 10);
+  const { data: agendaHoje = [] } = useQuery<EventoAgenda[]>({
+    queryKey: ["agenda-hoje"],
+    queryFn: async () => {
+      const evs = await apiFetch<EventoAgenda[]>("/api/v1/agenda");
+      return evs.filter(ev => ev.start.startsWith(hoje)).sort((a, b) => a.start.localeCompare(b.start));
+    },
+    staleTime: 5 * 60 * 1000,
+    retry: false,
   });
 
   if (isLoading) return <HomeSkeleton />;
@@ -153,6 +164,31 @@ export default function Home() {
             <div className="space-y-2">
               {resumo.proximas_despesas.map((d, i) => (
                 <DespesaItem key={i} despesa={d} />
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* Agenda do dia */}
+        <section className="bg-card border border-border rounded-xl p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="flex items-center gap-2 text-sm font-semibold">
+              <CalendarClock size={15} className="text-[#C8DA2D]" />
+              Agenda de hoje
+            </h2>
+            <button
+              onClick={() => navigate("/rotina")}
+              className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+            >
+              Ver agenda <ArrowRight size={12} />
+            </button>
+          </div>
+          {agendaHoje.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-6">Sem compromissos hoje.</p>
+          ) : (
+            <div className="space-y-2">
+              {agendaHoje.map(ev => (
+                <AgendaItem key={ev.id} evento={ev} />
               ))}
             </div>
           )}
@@ -273,6 +309,23 @@ function DespesaItem({ despesa }: { despesa: DespesaResumo }) {
       <span className="text-sm font-medium tabular-nums shrink-0 text-red-400">
         -{fmtBRL(despesa.valor)}
       </span>
+    </div>
+  );
+}
+
+function AgendaItem({ evento }: { evento: EventoAgenda }) {
+  const start = new Date(evento.start);
+  const end   = new Date(evento.end);
+  const fmt   = (d: Date) => `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+  return (
+    <div className="flex items-start gap-3 py-1.5">
+      <span className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded border bg-blue-400/10 text-blue-400 border-blue-400/20 mt-0.5 tabular-nums">
+        {fmt(start)}
+      </span>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm leading-snug truncate">{evento.title}</p>
+        <p className="text-[10px] text-muted-foreground mt-0.5">{fmt(start)} – {fmt(end)}</p>
+      </div>
     </div>
   );
 }

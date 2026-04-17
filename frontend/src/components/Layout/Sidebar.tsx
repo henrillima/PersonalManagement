@@ -14,6 +14,7 @@ import {
   AlertTriangle,
   Heart,
   ShoppingBag,
+  CalendarClock,
   LogOut,
   ChevronDown,
 } from "lucide-react";
@@ -132,6 +133,17 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
             </div>
           )}
         </div>
+
+        <NavLink
+          to="/rotina"
+          className={({ isActive }) =>
+            cn("flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+              isActive ? "bg-[#C8DA2D] text-[#0C1923]" : "text-white/60 hover:text-white hover:bg-white/8")
+          }
+        >
+          <CalendarClock size={16} />
+          Agenda
+        </NavLink>
 
         <NavLink
           to="/lista-compras"
