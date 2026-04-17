@@ -319,7 +319,7 @@ function AgendaItem({ evento }: { evento: EventoAgenda }) {
   const fmt   = (d: Date) => `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
   return (
     <div className="flex items-start gap-3 py-1.5">
-      <span className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded border bg-blue-400/10 text-blue-400 border-blue-400/20 mt-0.5 tabular-nums">
+      <span className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-600 text-white mt-0.5 tabular-nums">
         {fmt(start)}
       </span>
       <div className="flex-1 min-w-0">

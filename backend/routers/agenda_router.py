@@ -22,23 +22,14 @@ class EventoCreate(BaseModel):
     guests: Optional[str] = None
 
 
-def _add_tz(dt_str: str) -> str:
-    """Garante sufixo UTC se não houver timezone."""
-    if dt_str and "Z" not in dt_str and "+" not in dt_str and len(dt_str) >= 16:
-        return dt_str + "Z"
-    return dt_str
-
-
 @router.get("/agenda")
 def get_agenda(_: str = Depends(verify_token)):
     try:
         with httpx.Client(follow_redirects=True, timeout=15) as client:
             resp = client.get(_gas_url())
             eventos = resp.json()
-            for ev in eventos:
-                ev["start"] = _add_tz(ev.get("start", ""))
-                ev["end"] = _add_tz(ev.get("end", ""))
-            return eventos
+            # Exclui tasks do Google (start sem componente de hora, ex: "2024-04-17")
+            return [ev for ev in eventos if "T" in ev.get("start", "")]
     except Exception as e:
         raise HTTPException(502, f"Erro ao buscar agenda: {e}")
 

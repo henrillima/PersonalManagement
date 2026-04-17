@@ -339,11 +339,11 @@ function EventoCard({ evento, onClick }: { evento: EventoAgenda; onClick: () => 
       <div
         onClick={onClick}
         style={{ top, height, position: "absolute", left: 2, right: 2 }}
-        className="bg-blue-500/20 border border-blue-500/50 rounded px-1.5 py-1 overflow-hidden cursor-pointer hover:bg-blue-500/30 transition-colors z-10"
+        className="bg-blue-600 border border-blue-700 rounded px-1.5 py-1 overflow-hidden cursor-pointer hover:bg-blue-500 transition-colors z-10 shadow-sm"
       >
-        <p className="text-[11px] font-semibold text-blue-200 truncate leading-tight">{evento.title}</p>
+        <p className="text-[11px] font-semibold text-white truncate leading-tight">{evento.title}</p>
         {height > 30 && (
-          <p className="text-[10px] text-blue-300/70">{fmtHora(start)} – {fmtHora(end)}</p>
+          <p className="text-[10px] text-blue-100/80">{fmtHora(start)} – {fmtHora(end)}</p>
         )}
       </div>
     );
