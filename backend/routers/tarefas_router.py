@@ -27,7 +27,7 @@ def list_frentes(_: str = Depends(verify_token)):
 
 @router.post("/frentes", status_code=201)
 def create_frente(body: FrenteCreate, _: str = Depends(verify_token)):
-    row = get_db().table("frentes").insert({"nome": body.nome, "cor": body.cor}).execute().data
+    row = get_db().table("frentes").insert(body.model_dump(exclude_none=True)).execute().data
     return row[0] if row else {}
 
 
