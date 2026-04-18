@@ -27,6 +27,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import TarefasRecorrentesView from "@/pages/TarefasRecorrentesView";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -137,7 +138,7 @@ export default function Tarefas() {
 
   useEffect(() => {
     setFrenteFilter("all");
-    if (catTab && catTab !== "arquivo") setProjetoCat(catTab);
+    if (catTab && catTab !== "arquivo" && catTab !== "recorrentes") setProjetoCat(catTab);
   }, [catTab]);
 
   // ── Mutations ──────────────────────────────────────────────────────────────
@@ -383,6 +384,17 @@ export default function Tarefas() {
             </button>
           ))}
           <button
+            onClick={() => setCatTab("recorrentes")}
+            className={cn(
+              "px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px whitespace-nowrap shrink-0",
+              catTab === "recorrentes"
+                ? "border-[#C8DA2D] text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            )}
+          >
+            🔁 Recorrentes
+          </button>
+          <button
             onClick={() => setCatTab("arquivo")}
             className={cn(
               "ml-auto px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px whitespace-nowrap shrink-0",
@@ -396,7 +408,9 @@ export default function Tarefas() {
         </div>
       )}
 
-      {catTab === "arquivo" ? (
+      {catTab === "recorrentes" ? (
+        <TarefasRecorrentesView />
+      ) : catTab === "arquivo" ? (
         <ArquivoView
           arquivadas={arquivadas}
           categorias={categorias}

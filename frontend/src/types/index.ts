@@ -106,6 +106,7 @@ export interface FaturaRow {
   cartao: string;
   vencimento: number;
   valor: number;
+  pago: boolean;
 }
 
 export interface FaturasResponse {
@@ -125,6 +126,7 @@ export interface FluxoRecorrente {
   valor: number;
   inicio: string;  // YYYY-MM
   fim: string | null;
+  via_cartao: boolean;
   criado_em: string;
 }
 
@@ -136,6 +138,15 @@ export interface FluxoPontual {
   dia: number;
   valor: number;
   mes_alvo: string; // YYYY-MM
+  pago: boolean;
+  criado_em: string;
+}
+
+export interface RecorrentePagamento {
+  id: string;
+  recorrente_id: string;
+  mes: string;
+  pago: boolean;
   criado_em: string;
 }
 
@@ -248,6 +259,40 @@ export interface HomeResumo {
   tarefas_semana: TarefaResumo[];
   tarefas_atrasadas: TarefaResumo[];
   proximas_despesas: DespesaResumo[];
+}
+
+// ── Tarefas Recorrentes ───────────────────────────────────────────────────────
+
+export interface TarefaRecorrente {
+  id: string;
+  titulo: string;
+  descricao: string | null;
+  frente_id: string | null;
+  frente_nome: string | null;
+  frente_cor: string | null;
+  categoria: string;
+  prioridade: Prioridade;
+  frequencia: "diaria" | "semanal" | "mensal" | "anual";
+  dias_semana: number[] | null;
+  dia_mes: number | null;
+  mes: number | null;
+  ativo: boolean;
+  criado_em: string;
+}
+
+export interface TarefaRecorrenteOcorrencia {
+  id: string;
+  recorrente_id: string;
+  data_alvo: string;
+  concluida: boolean;
+  titulo: string;
+  descricao: string | null;
+  categoria: string;
+  prioridade: Prioridade;
+  frente_nome: string | null;
+  frente_cor: string | null;
+  frequencia: string;
+  criado_em: string;
 }
 
 // ── Saúde ─────────────────────────────────────────────────────────────────────

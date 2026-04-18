@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Trash2, Pencil, ChevronLeft, ChevronRight } from "lucide-react";
+import { Plus, Trash2, Pencil, ChevronLeft, ChevronRight, Check } from "lucide-react";
 import { apiFetch, fmtBRL, currentMes, mesLabel } from "@/lib/api";
 import type { FluxoPontual } from "@/types";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,12 @@ function addMonths(mes: string, delta: number): string {
   const [y, m] = mes.split("-").map(Number);
   const d = new Date(y, m - 1 + delta, 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function isOverdue(r: FluxoPontual, mes: string): boolean {
+  if (r.pago || r.tipo !== "Despesa") return false;
+  const todayMes = currentMes();
+  return mes === todayMes && r.dia < new Date().getDate();
 }
 
 interface Form {
@@ -48,7 +54,10 @@ export default function Pontuais() {
     queryFn: () => apiFetch(`/api/v1/pontuais?mes=${mes}`),
   });
 
-  const invalidate = () => qc.invalidateQueries({ queryKey: ["pontuais", mes] });
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ["pontuais", mes] });
+    qc.invalidateQueries({ queryKey: ["financeiro-dashboard"] });
+  };
 
   const create = useMutation({
     mutationFn: (d: object) => apiFetch("/api/v1/pontuais", { method: "POST", body: JSON.stringify(d) }),
@@ -64,6 +73,23 @@ export default function Pontuais() {
   const del = useMutation({
     mutationFn: (id: string) => apiFetch(`/api/v1/pontuais/${id}`, { method: "DELETE" }),
     onSuccess: invalidate,
+  });
+
+  const togglePago = useMutation({
+    mutationFn: ({ id, pago }: { id: string; pago: boolean }) =>
+      apiFetch(`/api/v1/pontuais/${id}`, { method: "PATCH", body: JSON.stringify({ pago }) }),
+    onMutate: async ({ id, pago }) => {
+      await qc.cancelQueries({ queryKey: ["pontuais", mes] });
+      const prev = qc.getQueryData<FluxoPontual[]>(["pontuais", mes]);
+      qc.setQueryData<FluxoPontual[]>(["pontuais", mes], (old = []) =>
+        old.map((r) => r.id === id ? { ...r, pago } : r)
+      );
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => {
+      if (ctx?.prev) qc.setQueryData(["pontuais", mes], ctx.prev);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ["pontuais", mes] }),
   });
 
   function openCreate() { setEditing(null); setForm(empty(mes)); setOpen(true); }
@@ -86,13 +112,17 @@ export default function Pontuais() {
   const despesas = rows.filter((r) => r.tipo === "Despesa");
   const totalReceitas = receitas.reduce((s, r) => s + r.valor, 0);
   const totalDespesas = despesas.reduce((s, r) => s + r.valor, 0);
+  const pagas = despesas.filter((r) => r.pago);
+  const vencidas = despesas.filter((r) => isOverdue(r, mes));
 
   if (isLoading) return <Skeleton className="h-64 rounded-xl" />;
+
+  const sorted = [...rows].sort((a, b) => a.dia - b.dia);
 
   return (
     <div className="space-y-5">
       {/* Month navigator */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         <button onClick={() => setMes(addMonths(mes, -1))} className="p-1.5 rounded-lg hover:bg-muted transition-colors">
           <ChevronLeft size={16} />
         </button>
@@ -100,11 +130,22 @@ export default function Pontuais() {
         <button onClick={() => setMes(addMonths(mes, 1))} className="p-1.5 rounded-lg hover:bg-muted transition-colors">
           <ChevronRight size={16} />
         </button>
-        <div className="flex-1" />
-        <div className="flex gap-4 text-sm mr-2">
+
+        <div className="flex gap-4 text-sm ml-1">
           <span className="text-green-400 font-semibold">+{fmtBRL(totalReceitas)}</span>
           <span className="text-red-400 font-semibold">-{fmtBRL(totalDespesas)}</span>
         </div>
+
+        <div className="flex gap-2 text-xs ml-1">
+          {pagas.length > 0 && (
+            <span className="text-green-400">{pagas.length} paga{pagas.length > 1 ? "s" : ""}</span>
+          )}
+          {vencidas.length > 0 && (
+            <span className="text-red-400 font-semibold">⚠ {vencidas.length} vencida{vencidas.length > 1 ? "s" : ""}</span>
+          )}
+        </div>
+
+        <div className="flex-1" />
         <Button size="sm" onClick={openCreate} className="bg-[#C8DA2D] text-[#0C1923] hover:bg-[#d4e640]">
           <Plus size={14} className="mr-1" /> Novo
         </Button>
@@ -115,26 +156,61 @@ export default function Pontuais() {
           Nenhum lançamento pontual em {mesLabel(mes)}.
         </div>
       ) : (
-        <div className="space-y-1">
-          {[...rows].sort((a, b) => a.dia - b.dia).map((r) => (
-            <div key={r.id} className="flex items-center gap-3 bg-card border border-border rounded-lg px-4 py-3">
-              <span className="text-xs text-muted-foreground w-6 shrink-0">dia {r.dia}</span>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{r.descricao}</p>
-                <p className="text-xs text-muted-foreground">{r.categoria}</p>
+        <div className="space-y-1.5">
+          {sorted.map((r) => {
+            const overdue = isOverdue(r, mes);
+            const color = r.tipo === "Receita" ? "text-green-400" : "text-red-400";
+            return (
+              <div
+                key={r.id}
+                className={cn(
+                  "flex items-center gap-3 bg-card border rounded-lg px-4 py-3 transition-colors",
+                  overdue ? "border-red-500/40 bg-red-500/5" : r.pago ? "border-green-500/20 bg-green-500/5" : "border-border"
+                )}
+              >
+                {/* Pago toggle — only for despesas */}
+                {r.tipo === "Despesa" ? (
+                  <button
+                    onClick={() => togglePago.mutate({ id: r.id, pago: !r.pago })}
+                    className={cn(
+                      "w-6 h-6 rounded-full border-2 flex items-center justify-center shrink-0 transition-all",
+                      r.pago
+                        ? "bg-green-500 border-green-500"
+                        : overdue
+                          ? "border-red-400 hover:border-red-500"
+                          : "border-muted-foreground/30 hover:border-green-500"
+                    )}
+                  >
+                    {r.pago && <Check size={11} className="text-white" strokeWidth={3} />}
+                  </button>
+                ) : (
+                  <div className="w-6 h-6 shrink-0" />
+                )}
+
+                <span className="text-xs text-muted-foreground w-8 shrink-0">dia {r.dia}</span>
+
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    {overdue && <span className="text-[10px] font-bold text-red-400">⚠</span>}
+                    <p className={cn("text-sm font-medium truncate", r.pago && "line-through text-muted-foreground")}>
+                      {r.descricao}
+                    </p>
+                  </div>
+                  <p className="text-xs text-muted-foreground">{r.categoria}</p>
+                </div>
+
+                <span className={cn("font-semibold tabular-nums shrink-0 text-sm", r.pago ? "text-muted-foreground" : color)}>
+                  {r.tipo === "Receita" ? "+" : "-"}{fmtBRL(r.valor)}
+                </span>
+                <button onClick={() => openEdit(r)} className="text-muted-foreground hover:text-foreground transition-colors">
+                  <Pencil size={14} />
+                </button>
+                <button onClick={() => del.mutate(r.id)} className="text-muted-foreground hover:text-red-500 transition-colors">
+                  <Trash2 size={14} />
+                </button>
               </div>
-              <span className={cn("font-semibold tabular-nums shrink-0 text-sm",
-                r.tipo === "Receita" ? "text-green-400" : "text-red-400")}>
-                {r.tipo === "Receita" ? "+" : "-"}{fmtBRL(r.valor)}
-              </span>
-              <button onClick={() => openEdit(r)} className="text-muted-foreground hover:text-foreground transition-colors">
-                <Pencil size={14} />
-              </button>
-              <button onClick={() => del.mutate(r.id)} className="text-muted-foreground hover:text-red-500 transition-colors">
-                <Trash2 size={14} />
-              </button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

@@ -13,7 +13,7 @@ class ItemCreate(BaseModel):
     unidade: str = "un"
     valor_esperado: Optional[float] = None
     categoria: Optional[str] = None
-    tipo: Optional[str] = "mercado"  # "mercado" | "desejo"
+    tipo: Optional[str] = None  # "mercado" | "desejo" — sent explicitly by frontend
 
 
 class ItemUpdate(BaseModel):

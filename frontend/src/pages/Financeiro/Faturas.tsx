@@ -1,18 +1,26 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
+import { Plus, Trash2, ChevronLeft, ChevronRight, Check } from "lucide-react";
 import { apiFetch, fmtBRL, currentMes, mesLabel } from "@/lib/api";
-import type { FaturaCartao, FaturasResponse } from "@/types";
+import type { FaturaCartao, FaturasResponse, FaturaRow } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 
 function addMonths(mes: string, delta: number): string {
   const [y, m] = mes.split("-").map(Number);
   const d = new Date(y, m - 1 + delta, 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function isOverdue(row: FaturaRow, mes: string): boolean {
+  if (row.pago || row.valor === 0) return false;
+  const today = new Date();
+  const todayMes = currentMes();
+  return mes === todayMes && row.vencimento < today.getDate();
 }
 
 export default function Faturas() {
@@ -36,6 +44,7 @@ export default function Faturas() {
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["faturas", mes] });
     qc.invalidateQueries({ queryKey: ["home-resumo"] });
+    qc.invalidateQueries({ queryKey: ["financeiro-dashboard"] });
   };
 
   const createCartao = useMutation({
@@ -53,20 +62,48 @@ export default function Faturas() {
     onSuccess: invalidate,
   });
 
+  const togglePago = useMutation({
+    mutationFn: ({ cartao, pago }: { cartao: string; pago: boolean }) =>
+      apiFetch("/api/v1/faturas/pago", {
+        method: "PATCH",
+        body: JSON.stringify({ cartao, mes, pago }),
+      }),
+    onMutate: async ({ cartao, pago }) => {
+      await qc.cancelQueries({ queryKey: ["faturas", mes] });
+      const prev = qc.getQueryData<FaturasResponse>(["faturas", mes]);
+      qc.setQueryData<FaturasResponse>(["faturas", mes], (old) => {
+        if (!old) return old;
+        return {
+          ...old,
+          faturas: old.faturas.map((r) => r.cartao === cartao ? { ...r, pago } : r),
+        };
+      });
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => {
+      if (ctx?.prev) qc.setQueryData(["faturas", mes], ctx.prev);
+    },
+    onSettled: invalidate,
+  });
+
   function handleBlur(cartao: string) {
-    const key = cartao;
-    if (localEdits[key] === undefined) return;
-    const valor = parseFloat(localEdits[key] || "0");
+    if (localEdits[cartao] === undefined) return;
+    const valor = parseFloat(localEdits[cartao] || "0");
     upsertFatura.mutate({ cartao, mes, valor });
-    setLocalEdits((e) => { const n = { ...e }; delete n[key]; return n; });
+    setLocalEdits((e) => { const n = { ...e }; delete n[cartao]; return n; });
   }
 
   if (lC || lF) return <Skeleton className="h-64 rounded-xl" />;
 
+  const rows = faturas?.faturas ?? [];
+  const pagas   = rows.filter((r) => r.pago && r.valor > 0);
+  const pendentes = rows.filter((r) => !r.pago && r.valor > 0);
+  const vencidas  = pendentes.filter((r) => isOverdue(r, mes));
+
   return (
     <div className="space-y-5">
       {/* Month navigator */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         <button onClick={() => setMes(addMonths(mes, -1))} className="p-1.5 rounded-lg hover:bg-muted transition-colors">
           <ChevronLeft size={16} />
         </button>
@@ -74,16 +111,32 @@ export default function Faturas() {
         <button onClick={() => setMes(addMonths(mes, 1))} className="p-1.5 rounded-lg hover:bg-muted transition-colors">
           <ChevronRight size={16} />
         </button>
-        <span className="text-sm text-muted-foreground ml-2">
-          Total: <span className="font-semibold text-foreground">{fmtBRL(faturas?.total ?? 0)}</span>
-        </span>
+
+        {/* Status summary */}
+        <div className="flex gap-3 text-xs ml-2">
+          {pagas.length > 0 && (
+            <span className="text-green-400 font-medium">
+              {pagas.length} {pagas.length === 1 ? "paga" : "pagas"} · {fmtBRL(pagas.reduce((s, r) => s + r.valor, 0))}
+            </span>
+          )}
+          {vencidas.length > 0 && (
+            <span className="text-red-400 font-semibold animate-pulse">
+              ⚠ {vencidas.length} vencida{vencidas.length > 1 ? "s" : ""}
+            </span>
+          )}
+          {pendentes.length > 0 && vencidas.length === 0 && (
+            <span className="text-muted-foreground">
+              {pendentes.length} a vencer · {fmtBRL(pendentes.reduce((s, r) => s + r.valor, 0))}
+            </span>
+          )}
+        </div>
+
         <div className="flex-1" />
         <Button variant="outline" size="sm" onClick={() => setCartaoOpen(true)}>
           <Plus size={14} className="mr-1" /> Cartão
         </Button>
       </div>
 
-      {/* Faturas matrix */}
       {cartoes.length === 0 ? (
         <div className="bg-card border border-border rounded-xl p-8 text-center text-muted-foreground text-sm">
           Adicione seus cartões de crédito.
@@ -96,27 +149,58 @@ export default function Faturas() {
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">Cartão</th>
                 <th className="text-center px-4 py-3 font-medium text-muted-foreground">Vencimento</th>
                 <th className="text-right px-4 py-3 font-medium text-muted-foreground">Valor {mesLabel(mes)}</th>
+                <th className="text-center px-3 py-3 font-medium text-muted-foreground">Pago</th>
                 <th className="w-10 py-3" />
               </tr>
             </thead>
             <tbody>
-              {faturas?.faturas.map((row) => {
-                const editKey = row.cartao;
-                const displayVal = localEdits[editKey] ?? String(row.valor === 0 ? "" : row.valor);
+              {rows.map((row) => {
+                const overdue = isOverdue(row, mes);
+                const displayVal = localEdits[row.cartao] ?? String(row.valor === 0 ? "" : row.valor);
                 return (
-                  <tr key={row.cartao} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
-                    <td className="px-4 py-3 font-medium">{row.cartao}</td>
-                    <td className="px-4 py-3 text-center text-muted-foreground">dia {row.vencimento}</td>
+                  <tr
+                    key={row.cartao}
+                    className={cn(
+                      "border-b border-border last:border-0 transition-colors",
+                      overdue ? "bg-red-500/5" : row.pago && row.valor > 0 ? "bg-green-500/5" : "hover:bg-muted/30"
+                    )}
+                  >
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        {overdue && <span className="text-red-400 text-xs font-bold">⚠</span>}
+                        <span className={cn("font-medium", row.pago && row.valor > 0 && "line-through text-muted-foreground")}>
+                          {row.cartao}
+                        </span>
+                      </div>
+                    </td>
+                    <td className={cn("px-4 py-3 text-center", overdue ? "text-red-400 font-semibold" : "text-muted-foreground")}>
+                      dia {row.vencimento}
+                    </td>
                     <td className="px-4 py-3">
                       <input
                         type="number"
                         step="0.01"
                         value={displayVal}
-                        onChange={(e) => setLocalEdits((eds) => ({ ...eds, [editKey]: e.target.value }))}
+                        onChange={(e) => setLocalEdits((eds) => ({ ...eds, [row.cartao]: e.target.value }))}
                         onBlur={() => handleBlur(row.cartao)}
                         className="w-full text-right bg-transparent border-0 outline-none focus:ring-1 focus:ring-[#C8DA2D]/60 rounded px-1 font-medium tabular-nums"
                         placeholder="0,00"
                       />
+                    </td>
+                    <td className="px-3 py-3 text-center">
+                      <button
+                        onClick={() => togglePago.mutate({ cartao: row.cartao, pago: !row.pago })}
+                        className={cn(
+                          "w-6 h-6 rounded-full border-2 flex items-center justify-center mx-auto transition-all",
+                          row.pago
+                            ? "bg-green-500 border-green-500"
+                            : overdue
+                              ? "border-red-400 hover:border-red-500"
+                              : "border-muted-foreground/40 hover:border-green-500"
+                        )}
+                      >
+                        {row.pago && <Check size={11} className="text-white" strokeWidth={3} />}
+                      </button>
                     </td>
                     <td className="px-2 py-3">
                       <button
@@ -133,8 +217,10 @@ export default function Faturas() {
             <tfoot>
               <tr className="bg-muted/50">
                 <td colSpan={2} className="px-4 py-3 font-semibold">Total</td>
-                <td className="px-4 py-3 text-right font-bold text-[#C8DA2D] tabular-nums">{fmtBRL(faturas?.total ?? 0)}</td>
-                <td />
+                <td className="px-4 py-3 text-right font-bold text-[#C8DA2D] tabular-nums">
+                  {fmtBRL(faturas?.total ?? 0)}
+                </td>
+                <td colSpan={2} />
               </tr>
             </tfoot>
           </table>

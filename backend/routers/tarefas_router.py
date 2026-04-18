@@ -172,3 +172,144 @@ def restaurar_tarefa(tarefa_id: str, _: str = Depends(verify_token)):
 @router.delete("/tarefas/{tarefa_id}", status_code=204)
 def delete_tarefa(tarefa_id: str, _: str = Depends(verify_token)):
     get_db().table("tarefas").delete().eq("id", tarefa_id).execute()
+
+
+# ── Tarefas Recorrentes ───────────────────────────────────────────────────────
+
+class TarefaRecorrenteCreate(BaseModel):
+    titulo: str
+    descricao: Optional[str] = None
+    frente_id: Optional[str] = None
+    categoria: str = "Geral"
+    prioridade: str = "media"
+    frequencia: str  # 'diaria' | 'semanal' | 'mensal' | 'anual'
+    dias_semana: Optional[list[int]] = None
+    dia_mes: Optional[int] = None
+    mes: Optional[int] = None
+
+class TarefaRecorrenteUpdate(BaseModel):
+    titulo: Optional[str] = None
+    descricao: Optional[str] = None
+    frente_id: Optional[str] = None
+    categoria: Optional[str] = None
+    prioridade: Optional[str] = None
+    frequencia: Optional[str] = None
+    dias_semana: Optional[list[int]] = None
+    dia_mes: Optional[int] = None
+    mes: Optional[int] = None
+    ativo: Optional[bool] = None
+
+class OcorrenciaUpdate(BaseModel):
+    concluida: bool
+
+# Static route MUST be defined before the parameterized /{rec_id} routes
+@router.get("/tarefas-recorrentes/ocorrencias")
+def get_ocorrencias(mes: str, _: str = Depends(verify_token)):
+    from datetime import date
+    import calendar
+
+    db = get_db()
+    year, month = int(mes[:4]), int(mes[5:7])
+    _, days_in_month = calendar.monthrange(year, month)
+
+    templates = db.table("tarefas_recorrentes").select("*, frentes(nome, cor)").eq("ativo", True).execute().data
+    templates = _flatten_frente(templates)
+
+    to_insert = []
+    for t in templates:
+        freq = t["frequencia"]
+        dates: list[date] = []
+
+        if freq == "diaria":
+            for day in range(1, days_in_month + 1):
+                dates.append(date(year, month, day))
+        elif freq == "semanal":
+            dias = t.get("dias_semana") or []
+            for day in range(1, days_in_month + 1):
+                d = date(year, month, day)
+                if d.weekday() in dias:
+                    dates.append(d)
+        elif freq == "mensal":
+            dia = t.get("dia_mes")
+            if dia and 1 <= dia <= days_in_month:
+                dates.append(date(year, month, dia))
+        elif freq == "anual":
+            dia = t.get("dia_mes")
+            mes_anual = t.get("mes")
+            if dia and mes_anual == month:
+                try:
+                    dates.append(date(year, month, dia))
+                except ValueError:
+                    pass
+
+        for d in dates:
+            to_insert.append({"recorrente_id": t["id"], "data_alvo": d.isoformat()})
+
+    if to_insert:
+        db.table("tarefas_recorrentes_ocorrencias").upsert(
+            to_insert,
+            on_conflict="recorrente_id,data_alvo",
+            ignore_duplicates=True,
+        ).execute()
+
+    mes_start = f"{mes}-01"
+    mes_end = f"{mes}-{days_in_month:02d}"
+    ocorrencias = (
+        db.table("tarefas_recorrentes_ocorrencias")
+        .select("*")
+        .gte("data_alvo", mes_start)
+        .lte("data_alvo", mes_end)
+        .order("data_alvo")
+        .execute()
+        .data
+    )
+
+    tmpl_map = {t["id"]: t for t in templates}
+    result = []
+    for o in ocorrencias:
+        tmpl = tmpl_map.get(o["recorrente_id"], {})
+        result.append({
+            **o,
+            "titulo": tmpl.get("titulo", ""),
+            "descricao": tmpl.get("descricao"),
+            "categoria": tmpl.get("categoria", "Geral"),
+            "prioridade": tmpl.get("prioridade", "media"),
+            "frente_nome": tmpl.get("frente_nome"),
+            "frente_cor": tmpl.get("frente_cor"),
+            "frequencia": tmpl.get("frequencia"),
+        })
+    return result
+
+@router.get("/tarefas-recorrentes")
+def list_tarefas_recorrentes(_: str = Depends(verify_token)):
+    rows = get_db().table("tarefas_recorrentes").select("*, frentes(nome, cor)").order("titulo").execute().data
+    return _flatten_frente(rows)
+
+@router.post("/tarefas-recorrentes", status_code=201)
+def create_tarefa_recorrente(body: TarefaRecorrenteCreate, _: str = Depends(verify_token)):
+    row = get_db().table("tarefas_recorrentes").insert(body.model_dump(exclude_none=True)).execute().data
+    return row[0] if row else {}
+
+@router.patch("/tarefas-recorrentes/ocorrencias/{ocorrencia_id}")
+def toggle_ocorrencia(ocorrencia_id: str, body: OcorrenciaUpdate, _: str = Depends(verify_token)):
+    row = (
+        get_db()
+        .table("tarefas_recorrentes_ocorrencias")
+        .update({"concluida": body.concluida})
+        .eq("id", ocorrencia_id)
+        .execute()
+        .data
+    )
+    return row[0] if row else {}
+
+@router.patch("/tarefas-recorrentes/{rec_id}")
+def update_tarefa_recorrente(rec_id: str, body: TarefaRecorrenteUpdate, _: str = Depends(verify_token)):
+    payload = body.model_dump(exclude_none=True)
+    if not payload:
+        raise HTTPException(400, "Nenhum campo")
+    row = get_db().table("tarefas_recorrentes").update(payload).eq("id", rec_id).execute().data
+    return row[0] if row else {}
+
+@router.delete("/tarefas-recorrentes/{rec_id}", status_code=204)
+def delete_tarefa_recorrente(rec_id: str, _: str = Depends(verify_token)):
+    get_db().table("tarefas_recorrentes").delete().eq("id", rec_id).execute()

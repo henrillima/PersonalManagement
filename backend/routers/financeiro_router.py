@@ -112,6 +112,7 @@ def get_faturas(mes: str, _: str = Depends(verify_token)):
             "cartao": c["cartao"],
             "vencimento": c["vencimento"],
             "valor": float(fat.get("valor", 0)),
+            "pago": bool(fat.get("pago", False)),
         })
     total = sum(r["valor"] for r in result)
     return {"mes": mes, "faturas": result, "total": round(total, 2)}
@@ -124,6 +125,16 @@ def upsert_fatura(body: FaturaUpsert, _: str = Depends(verify_token)):
     ).execute()
     return {"ok": True}
 
+class FaturaPago(BaseModel):
+    cartao: str
+    mes: str
+    pago: bool
+
+@router.patch("/faturas/pago")
+def set_fatura_pago(body: FaturaPago, _: str = Depends(verify_token)):
+    get_db().table("faturas").update({"pago": body.pago}).eq("cartao", body.cartao).eq("mes", body.mes).execute()
+    return {"ok": True}
+
 # ══ FLUXOS RECORRENTES ═══════════════════════════════════════════════════════
 
 class RecorrenteCreate(BaseModel):
@@ -134,6 +145,7 @@ class RecorrenteCreate(BaseModel):
     valor: float
     inicio: str      # YYYY-MM
     fim: Optional[str] = None
+    via_cartao: Optional[bool] = None
 
 class RecorrenteUpdate(BaseModel):
     tipo: Optional[str] = None
@@ -143,6 +155,7 @@ class RecorrenteUpdate(BaseModel):
     valor: Optional[float] = None
     inicio: Optional[str] = None
     fim: Optional[str] = None
+    via_cartao: Optional[bool] = None
 
 @router.get("/recorrentes")
 def list_recorrentes(_: str = Depends(verify_token)):
@@ -165,6 +178,23 @@ def update_recorrente(rec_id: str, body: RecorrenteUpdate, _: str = Depends(veri
 def delete_recorrente(rec_id: str, _: str = Depends(verify_token)):
     get_db().table("fluxos_recorrentes").delete().eq("id", rec_id).execute()
 
+# ── Recorrentes Pagamentos ────────────────────────────────────────────────────
+
+class PagamentoBody(BaseModel):
+    pago: bool
+
+@router.get("/recorrentes-pagamentos")
+def list_recorrentes_pagamentos(mes: str, _: str = Depends(verify_token)):
+    return get_db().table("recorrentes_pagamentos").select("*").eq("mes", mes).execute().data
+
+@router.post("/recorrentes/{rec_id}/pagamentos/{mes}", status_code=200)
+def upsert_recorrente_pagamento(rec_id: str, mes: str, body: PagamentoBody, _: str = Depends(verify_token)):
+    get_db().table("recorrentes_pagamentos").upsert(
+        {"recorrente_id": rec_id, "mes": mes, "pago": body.pago},
+        on_conflict="recorrente_id,mes",
+    ).execute()
+    return {"ok": True}
+
 # ══ FLUXOS PONTUAIS ══════════════════════════════════════════════════════════
 
 class PontualCreate(BaseModel):
@@ -182,6 +212,7 @@ class PontualUpdate(BaseModel):
     dia: Optional[int] = None
     valor: Optional[float] = None
     mes_alvo: Optional[str] = None
+    pago: Optional[bool] = None
 
 @router.get("/pontuais")
 def list_pontuais(mes: Optional[str] = None, _: str = Depends(verify_token)):
@@ -436,7 +467,7 @@ def get_financeiro_dashboard(_: str = Depends(verify_token)):
         m = total_month % 12 + 1
         months.append(f"{y:04d}-{m:02d}")
 
-    # Pontuais for those months only
+    # Pontuais for those months
     pontuais = (
         db.table("fluxos_pontuais")
         .select("*")
@@ -446,39 +477,138 @@ def get_financeiro_dashboard(_: str = Depends(verify_token)):
         .data
     )
 
-    # 6-month running projection
+    # Terceiros (a receber) for those months
+    try:
+        terceiros_rows = (
+            db.table("terceiros")
+            .select("mes_alvo, valor, recebido")
+            .gte("mes_alvo", months[0])
+            .lte("mes_alvo", months[-1])
+            .execute()
+            .data
+        )
+    except Exception:
+        terceiros_rows = []
+
+    # Dívidas (a pagar) for those months
+    try:
+        dividas_rows = (
+            db.table("dividas")
+            .select("mes, valor, pago")
+            .gte("mes", months[0])
+            .lte("mes", months[-1])
+            .execute()
+            .data
+        )
+    except Exception:
+        dividas_rows = []
+
+    # Faturas (credit card bills) for those months
+    try:
+        faturas_rows = (
+            db.table("faturas")
+            .select("mes, valor")
+            .gte("mes", months[0])
+            .lte("mes", months[-1])
+            .execute()
+            .data
+        )
+        from collections import defaultdict as _dd
+        faturas_by_mes: dict[str, float] = _dd(float)
+        for f in faturas_rows:
+            faturas_by_mes[f["mes"]] += float(f["valor"])
+    except Exception:
+        faturas_by_mes = {}
+
+    # Orçamento (custo de vida budget) — base + per-month exceptions
+    try:
+        orcamento_rows = db.table("orcamento").select("*").execute().data
+        base_orcamento = {
+            r["categoria"]: float(r["teto"])
+            for r in orcamento_rows if r.get("mes_excecao") is None
+        }
+        # (categoria, mes_excecao) → teto
+        exc_orcamento = {
+            (r["categoria"], r["mes_excecao"]): float(r["teto"])
+            for r in orcamento_rows if r.get("mes_excecao") is not None
+        }
+    except Exception:
+        base_orcamento = {}
+        exc_orcamento = {}
+
+    def custo_vida_para_mes(mes_str: str) -> float:
+        total = 0.0
+        for cat, base_teto in base_orcamento.items():
+            teto = exc_orcamento.get((cat, mes_str), base_teto)
+            total += teto
+        # Exception-only categories (no base rule)
+        for (cat, mes), teto in exc_orcamento.items():
+            if mes == mes_str and cat not in base_orcamento:
+                total += teto
+        return total
+
+    # 6-month running projection with breakdown by source
     saldo = saldo_atual
     projection = []
     for mes_str in months:
-        receita = 0.0
-        despesa = 0.0
+        rec_receita = 0.0
+        pont_receita = 0.0
+        terceiros_val = 0.0
+        rec_despesa = 0.0
+        pont_despesa = 0.0
+        dividas_val = 0.0
+        faturas_val = round(faturas_by_mes.get(mes_str, 0.0), 2)
+        custo_vida_val = round(custo_vida_para_mes(mes_str), 2)
+
         for r in recorrentes:
             inicio = r["inicio"]
             fim = r.get("fim")
             if inicio <= mes_str and (fim is None or fim >= mes_str):
                 valor = float(r["valor"])
                 if r["tipo"] == "Receita":
-                    receita += valor
-                else:
-                    despesa += valor
+                    rec_receita += valor
+                elif not r.get("via_cartao", False):
+                    # via_cartao=True → already counted in faturas_val, skip to avoid double-counting
+                    rec_despesa += valor
+
         for p in pontuais:
             if p["mes_alvo"] == mes_str:
                 valor = float(p["valor"])
                 if p["tipo"] == "Receita":
-                    receita += valor
+                    pont_receita += valor
                 else:
-                    despesa += valor
-        saldo += receita - despesa
+                    pont_despesa += valor
+
+        for t in terceiros_rows:
+            if t["mes_alvo"] == mes_str and not t.get("recebido", False):
+                terceiros_val += float(t["valor"])
+
+        for d in dividas_rows:
+            d_mes = d["mes"][:7] if d["mes"] and len(d["mes"]) >= 7 else d["mes"]
+            if d_mes == mes_str and not d.get("pago", False):
+                dividas_val += float(d["valor"])
+
+        total_in  = rec_receita + pont_receita + terceiros_val
+        total_out = rec_despesa + pont_despesa + dividas_val + faturas_val + custo_vida_val
+        saldo += total_in - total_out
+
         projection.append({
             "mes": mes_str,
-            "receita": round(receita, 2),
-            "despesa": round(despesa, 2),
+            "rec_receita": round(rec_receita, 2),
+            "pont_receita": round(pont_receita, 2),
+            "terceiros": round(terceiros_val, 2),
+            "rec_despesa": round(rec_despesa, 2),
+            "pont_despesa": round(pont_despesa, 2),
+            "dividas": round(dividas_val, 2),
+            "faturas_val": faturas_val,
+            "custo_vida_val": custo_vida_val,
             "saldo": round(saldo, 2),
         })
 
-    # Expense distribution for current month
+    # Expense distribution for current month — recorrentes + pontuais + gastos variáveis
     cur_mes = months[0]
     cat_map: dict[str, float] = defaultdict(float)
+
     for r in recorrentes:
         if r["tipo"] == "Despesa":
             inicio = r["inicio"]
@@ -486,10 +616,25 @@ def get_financeiro_dashboard(_: str = Depends(verify_token)):
             if inicio <= cur_mes and (fim is None or fim >= cur_mes):
                 cat = r.get("categoria") or "Outros"
                 cat_map[cat] += float(r["valor"])
+
     for p in pontuais:
         if p["tipo"] == "Despesa" and p["mes_alvo"] == cur_mes:
             cat = p.get("categoria") or "Outros"
             cat_map[cat] += float(p["valor"])
+
+    try:
+        gastos_var = (
+            db.table("gastos_variaveis")
+            .select("categoria, valor")
+            .eq("mes", cur_mes)
+            .execute()
+            .data
+        )
+        for g in gastos_var:
+            cat = g.get("categoria") or "Outros"
+            cat_map[cat] += float(g["valor"])
+    except Exception:
+        pass
 
     distribuicao = sorted(
         [{"categoria": k, "valor": round(v, 2)} for k, v in cat_map.items()],

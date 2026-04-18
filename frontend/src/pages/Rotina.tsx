@@ -3,12 +3,13 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { addDays, addWeeks, subWeeks, startOfWeek, isSameDay, format } from "date-fns";
 import {
   ChevronLeft, ChevronRight, Plus, Calendar, Clock,
-  AlertCircle, Trash2, Archive, Wallet,
+  AlertCircle, Trash2, Archive, Wallet, Check,
 } from "lucide-react";
 import { apiFetch, fmtBRL, fmtDate } from "@/lib/api";
 import type {
   EventoAgenda, Tarefa, FluxoPontual, FluxoRecorrente,
-  Frente, CategoriaItem, Prioridade, TarefaStatus,
+  Frente, CategoriaItem, Prioridade, TarefaStatus, Terceiro, FaturaCartao,
+  TarefaRecorrenteOcorrencia,
 } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -111,6 +112,20 @@ export default function Rotina() {
     retry: false,
   });
 
+  const { data: terceiros = [] } = useQuery<Terceiro[]>({
+    queryKey: ["terceiros"],
+    queryFn:  () => apiFetch("/api/v1/terceiros"),
+    staleTime: 10 * 60 * 1000,
+    retry: false,
+  });
+
+  const { data: cartoes = [] } = useQuery<FaturaCartao[]>({
+    queryKey: ["faturas-cartoes"],
+    queryFn:  () => apiFetch("/api/v1/faturas/cartoes"),
+    staleTime: 60 * 60 * 1000,
+    retry: false,
+  });
+
   const { data: frentes = [] } = useQuery<Frente[]>({
     queryKey: ["frentes"],
     queryFn:  () => apiFetch("/api/v1/frentes"),
@@ -122,6 +137,33 @@ export default function Rotina() {
     queryFn:  () => apiFetch("/api/v1/categorias"),
     staleTime: 10 * 60 * 1000,
   });
+
+  // Months covered by the current week (1 or 2)
+  const weekMonths = useMemo(() => {
+    const s = new Set<string>();
+    days.forEach(d => s.add(format(d, "yyyy-MM")));
+    return [...s];
+  }, [days]);
+
+  const { data: recOcorrencias1 = [] } = useQuery<TarefaRecorrenteOcorrencia[]>({
+    queryKey: ["tarefas-rec-ocorrencias", weekMonths[0]],
+    queryFn:  () => apiFetch(`/api/v1/tarefas-recorrentes/ocorrencias?mes=${weekMonths[0]}`),
+    staleTime: 2 * 60 * 1000,
+    retry: false,
+  });
+
+  const { data: recOcorrencias2 = [] } = useQuery<TarefaRecorrenteOcorrencia[]>({
+    queryKey: ["tarefas-rec-ocorrencias", weekMonths[1] ?? ""],
+    queryFn:  () => apiFetch(`/api/v1/tarefas-recorrentes/ocorrencias?mes=${weekMonths[1]}`),
+    enabled:  weekMonths.length > 1,
+    staleTime: 2 * 60 * 1000,
+    retry: false,
+  });
+
+  const recOcorrencias = useMemo(
+    () => [...recOcorrencias1, ...recOcorrencias2],
+    [recOcorrencias1, recOcorrencias2]
+  );
 
   // ── Mutations ─────────────────────────────────────────────────────────────────
 
@@ -152,6 +194,23 @@ export default function Rotina() {
     },
   });
 
+  const toggleOcorrencia = useMutation({
+    mutationFn: ({ id, concluida }: { id: string; concluida: boolean }) =>
+      apiFetch(`/api/v1/tarefas-recorrentes/ocorrencias/${id}`, {
+        method: "PATCH", body: JSON.stringify({ concluida }),
+      }),
+    onMutate: ({ id, concluida }) => {
+      for (const mes of weekMonths) {
+        qc.setQueryData<TarefaRecorrenteOcorrencia[]>(["tarefas-rec-ocorrencias", mes], (old = []) =>
+          old.map(o => o.id === id ? { ...o, concluida } : o)
+        );
+      }
+    },
+    onSettled: () => {
+      weekMonths.forEach(mes => qc.invalidateQueries({ queryKey: ["tarefas-rec-ocorrencias", mes] }));
+    },
+  });
+
   // ── Per-day helpers ───────────────────────────────────────────────────────────
 
   function eventosForDay(day: Date) {
@@ -172,21 +231,45 @@ export default function Rotina() {
       });
   }
 
-  type DespesaItem = { id: string; descricao: string; valor: number; categoria: string; tipo: "pontual" | "recorrente" };
+  type FluxoItem = { id: string; descricao: string; valor: number; categoria: string; tipo_fluxo: "pontual" | "recorrente"; isReceita: boolean };
 
-  function despesasForDay(day: Date): DespesaItem[] {
+  function fluxosForDay(day: Date): FluxoItem[] {
     const dayNum   = day.getDate();
     const monthStr = format(day, "yyyy-MM");
 
     const pts = pontuais
-      .filter(p => p.tipo === "Despesa" && p.dia === dayNum && p.mes_alvo === monthStr)
-      .map(p => ({ id: p.id, descricao: p.descricao, valor: p.valor, categoria: p.categoria, tipo: "pontual" as const }));
+      .filter(p => p.dia === dayNum && p.mes_alvo === monthStr)
+      .map(p => ({ id: p.id, descricao: p.descricao, valor: p.valor, categoria: p.categoria, tipo_fluxo: "pontual" as const, isReceita: p.tipo === "Receita" }));
 
     const recs = recorrentes
-      .filter(r => r.tipo === "Despesa" && r.dia === dayNum && r.inicio <= monthStr && (!r.fim || r.fim >= monthStr))
-      .map(r => ({ id: r.id, descricao: r.descricao, valor: r.valor, categoria: r.categoria, tipo: "recorrente" as const }));
+      .filter(r => r.dia === dayNum && r.inicio <= monthStr && (!r.fim || r.fim >= monthStr))
+      .map(r => ({ id: r.id, descricao: r.descricao, valor: r.valor, categoria: r.categoria, tipo_fluxo: "recorrente" as const, isReceita: r.tipo === "Receita" }));
 
     return [...pts, ...recs];
+  }
+
+  type TerceiroItem = { id: string; pessoa: string; descricao: string; valor: number; recebido: boolean };
+
+  function terceirosForDay(day: Date): TerceiroItem[] {
+    const dayNum   = day.getDate();
+    const monthStr = format(day, "yyyy-MM");
+    return terceiros
+      .filter(t => t.dia === dayNum && t.mes_alvo === monthStr)
+      .map(t => ({ id: t.id, pessoa: t.pessoa, descricao: t.descricao, valor: t.valor, recebido: t.recebido }));
+  }
+
+  function tarefasRecorrentesForDay(day: Date): TarefaRecorrenteOcorrencia[] {
+    const dayStr = format(day, "yyyy-MM-dd");
+    return recOcorrencias.filter(o => o.data_alvo === dayStr);
+  }
+
+  type FatVencItem = { cartao: string };
+
+  function faturaVencimentosForDay(day: Date): FatVencItem[] {
+    const dayNum = day.getDate();
+    return cartoes
+      .filter(c => c.vencimento === dayNum)
+      .map(c => ({ cartao: c.cartao }));
   }
 
   // ── Task edit dialog helpers ───────────────────────────────────────────────────
@@ -253,7 +336,7 @@ export default function Rotina() {
           className="ml-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors">
           Hoje
         </button>
-        <div className="ml-auto flex gap-4 text-xs text-muted-foreground">
+        <div className="ml-auto flex gap-3 text-xs text-muted-foreground flex-wrap justify-end">
           <span className="flex items-center gap-1.5">
             <span className="w-2.5 h-2.5 rounded-sm bg-blue-600 inline-block shrink-0" /> Compromisso
           </span>
@@ -261,7 +344,19 @@ export default function Rotina() {
             <span className="w-2.5 h-2.5 rounded-sm bg-card border border-border inline-block shrink-0" /> Tarefa
           </span>
           <span className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-sm bg-green-500/20 border border-green-500/30 inline-block shrink-0" /> Receita
+          </span>
+          <span className="flex items-center gap-1.5">
             <span className="w-2.5 h-2.5 rounded-sm bg-red-500/20 border border-red-500/30 inline-block shrink-0" /> Despesa
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-sm bg-teal-500/20 border border-teal-500/30 inline-block shrink-0" /> A Receber
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-sm bg-purple-500/20 border border-purple-500/30 inline-block shrink-0" /> Fatura
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-sm bg-indigo-500/20 border border-indigo-500/30 inline-block shrink-0" /> Rotina
           </span>
         </div>
       </div>
@@ -280,8 +375,11 @@ export default function Rotina() {
             const isToday     = isSameDay(day, today);
             const dayEvs      = eventosForDay(day);
             const dayTarefas  = tarefasForDay(day);
-            const dayDespesas = despesasForDay(day);
-            const totalItems  = dayEvs.length + dayTarefas.length + dayDespesas.length;
+            const dayFluxos   = fluxosForDay(day);
+            const dayTercs    = terceirosForDay(day);
+            const dayFatVenc  = faturaVencimentosForDay(day);
+            const dayRotinas  = tarefasRecorrentesForDay(day);
+            const totalItems  = dayEvs.length + dayTarefas.length + dayFluxos.length + dayTercs.length + dayFatVenc.length + dayRotinas.length;
 
             return (
               <div key={i} className="flex flex-col gap-1.5">
@@ -329,9 +427,29 @@ export default function Rotina() {
                     <TarefaCard key={t.id} tarefa={t} onClick={() => openEditTarefa(t)} />
                   ))}
 
-                  {/* Expenses */}
-                  {dayDespesas.map(d => (
-                    <DespesaCard key={d.id} despesa={d} />
+                  {/* Financial flows (receitas + despesas) */}
+                  {dayFluxos.map(f => f.isReceita
+                    ? <ReceitaCard key={f.id} fluxo={f} />
+                    : <DespesaCard key={f.id} despesa={f} />
+                  )}
+
+                  {/* Terceiros (a receber) */}
+                  {dayTercs.map(t => (
+                    <TerceiroCard key={t.id} terceiro={t} />
+                  ))}
+
+                  {/* Fatura vencimentos */}
+                  {dayFatVenc.map(f => (
+                    <FaturaVencCard key={f.cartao} item={f} />
+                  ))}
+
+                  {/* Tarefas recorrentes */}
+                  {dayRotinas.map(o => (
+                    <TarefaRecorrenteCard
+                      key={o.id}
+                      ocorrencia={o}
+                      onToggle={() => toggleOcorrencia.mutate({ id: o.id, concluida: !o.concluida })}
+                    />
                   ))}
 
                   {/* Empty */}
@@ -604,7 +722,7 @@ function TarefaCard({ tarefa, onClick }: { tarefa: Tarefa; onClick: () => void }
 }
 
 function DespesaCard({ despesa }: {
-  despesa: { id: string; descricao: string; valor: number; categoria: string; tipo: string };
+  despesa: { id: string; descricao: string; valor: number; categoria: string; tipo_fluxo: string };
 }) {
   return (
     <div className="bg-red-500/8 border border-red-500/20 rounded-lg px-2 py-1.5">
@@ -617,8 +735,108 @@ function DespesaCard({ despesa }: {
       </div>
       <p className="text-xs truncate leading-snug">{despesa.descricao}</p>
       <p className="text-[9px] text-muted-foreground mt-0.5">
-        {despesa.tipo === "recorrente" ? "Recorrente" : "Pontual"}
+        {despesa.tipo_fluxo === "recorrente" ? "Recorrente" : "Pontual"}
       </p>
+    </div>
+  );
+}
+
+function ReceitaCard({ fluxo }: {
+  fluxo: { id: string; descricao: string; valor: number; categoria: string; tipo_fluxo: string };
+}) {
+  return (
+    <div className="bg-green-500/8 border border-green-500/20 rounded-lg px-2 py-1.5">
+      <div className="flex items-baseline justify-between gap-1 mb-0.5">
+        <span className="text-[9px] text-muted-foreground truncate">{fluxo.categoria}</span>
+        <span className="text-[10px] font-bold text-green-400 shrink-0 tabular-nums">
+          +{fmtBRL(fluxo.valor)}
+        </span>
+      </div>
+      <p className="text-xs truncate leading-snug">{fluxo.descricao}</p>
+      <p className="text-[9px] text-muted-foreground mt-0.5">
+        {fluxo.tipo_fluxo === "recorrente" ? "Recorrente" : "Pontual"}
+      </p>
+    </div>
+  );
+}
+
+function TerceiroCard({ terceiro }: {
+  terceiro: { id: string; pessoa: string; descricao: string; valor: number; recebido: boolean };
+}) {
+  return (
+    <div className={cn(
+      "border rounded-lg px-2 py-1.5",
+      terceiro.recebido
+        ? "bg-teal-500/5 border-teal-500/10 opacity-50"
+        : "bg-teal-500/8 border-teal-500/20"
+    )}>
+      <div className="flex items-baseline justify-between gap-1 mb-0.5">
+        <span className="text-[9px] text-teal-400 font-semibold truncate">{terceiro.pessoa}</span>
+        <span className="text-[10px] font-bold text-teal-400 shrink-0 tabular-nums">
+          +{fmtBRL(terceiro.valor)}
+        </span>
+      </div>
+      <p className="text-xs truncate leading-snug">{terceiro.descricao}</p>
+      <p className="text-[9px] text-muted-foreground mt-0.5">
+        {terceiro.recebido ? "✓ Recebido" : "A receber"}
+      </p>
+    </div>
+  );
+}
+
+function FaturaVencCard({ item }: { item: { cartao: string } }) {
+  return (
+    <div className="bg-purple-500/8 border border-purple-500/20 rounded-lg px-2 py-1.5">
+      <p className="text-[9px] text-purple-400 font-semibold leading-none mb-0.5">💳 Fatura vence</p>
+      <p className="text-xs font-medium truncate leading-snug">{item.cartao}</p>
+    </div>
+  );
+}
+
+function TarefaRecorrenteCard({ ocorrencia, onToggle }: {
+  ocorrencia: TarefaRecorrenteOcorrencia;
+  onToggle: () => void;
+}) {
+  const cor = ({ alta: "#f87171", media: "#fbbf24", baixa: "#60a5fa" } as Record<string, string>)[ocorrencia.prioridade] ?? "#94a3b8";
+  return (
+    <div className={cn(
+      "border rounded-lg px-2 py-1.5 transition-colors",
+      ocorrencia.concluida
+        ? "bg-green-500/5 border-green-500/15 opacity-60"
+        : "bg-indigo-500/8 border-indigo-500/20"
+    )}>
+      <div className="flex items-center gap-1.5">
+        <button
+          onClick={onToggle}
+          className={cn(
+            "w-3.5 h-3.5 rounded-full border flex items-center justify-center shrink-0 transition-all",
+            ocorrencia.concluida
+              ? "bg-green-500 border-green-500"
+              : "border-indigo-400/60 hover:border-green-500"
+          )}
+        >
+          {ocorrencia.concluida && <Check size={8} className="text-white" strokeWidth={3} />}
+        </button>
+        <p className={cn(
+          "text-xs font-medium truncate leading-snug flex-1",
+          ocorrencia.concluida && "line-through text-muted-foreground"
+        )}>
+          {ocorrencia.titulo}
+        </p>
+      </div>
+      {ocorrencia.frente_nome && (
+        <p className="text-[9px] mt-0.5 ml-5 truncate"
+          style={{ color: ocorrencia.frente_cor ?? "#94a3b8" }}>
+          {ocorrencia.frente_nome}
+        </p>
+      )}
+      <p className="text-[9px] text-indigo-400/70 mt-0.5 ml-5">🔁 Rotina</p>
+      {ocorrencia.prioridade !== "media" && (
+        <span className="inline-block ml-5 text-[8px] font-semibold px-1 py-0.5 rounded mt-0.5"
+          style={{ backgroundColor: cor + "25", color: cor }}>
+          {ocorrencia.prioridade}
+        </span>
+      )}
     </div>
   );
 }
