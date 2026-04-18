@@ -257,6 +257,9 @@ export interface SaudePerfil {
   altura: number | null;
   sexo: "M" | "F" | null;
   fator_idx: number;
+  deficit_kcal: number | null;
+  meta_proteina_g_kg: number | null;
+  meta_peso: number | null;
   atualizado_em?: string;
 }
 

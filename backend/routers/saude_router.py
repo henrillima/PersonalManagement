@@ -24,8 +24,11 @@ def _openai():
 class PerfilUpdate(BaseModel):
     idade: Optional[int] = None
     altura: Optional[float] = None
-    sexo: Optional[str] = None        # M | F
-    fator_idx: Optional[int] = None   # 1-5
+    sexo: Optional[str] = None           # M | F
+    fator_idx: Optional[int] = None      # 1-5
+    deficit_kcal: Optional[int] = None   # kcal subtracted from TDEE (default 300)
+    meta_proteina_g_kg: Optional[float] = None  # g of protein per kg bodyweight
+    meta_peso: Optional[float] = None    # target weight in kg
 
 FATORES = [1.2, 1.375, 1.55, 1.725, 1.9]
 
