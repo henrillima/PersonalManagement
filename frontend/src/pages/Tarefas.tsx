@@ -209,12 +209,14 @@ export default function Tarefas() {
 
   // ── Computed ───────────────────────────────────────────────────────────────
   const projetosForTab = useMemo(
-    () => catTab === "arquivo" ? frentes : frentes.filter(f => f.categoria === catTab),
+    () => (catTab === "arquivo" || catTab === "todas") ? frentes : frentes.filter(f => f.categoria === catTab),
     [frentes, catTab]
   );
 
   const catTasks = useMemo(
-    () => localTasks.filter(t => !t.arquivado && t.categoria === catTab),
+    () => catTab === "todas"
+      ? localTasks.filter(t => !t.arquivado)
+      : localTasks.filter(t => !t.arquivado && t.categoria === catTab),
     [localTasks, catTab]
   );
 
@@ -293,13 +295,13 @@ export default function Tarefas() {
 
   // ── Helpers ────────────────────────────────────────────────────────────────
   function openCreate() {
-    const cat = catTab === "arquivo" ? (categorias[0]?.nome ?? "") : catTab;
+    const cat = (catTab === "arquivo" || catTab === "todas") ? (categorias[0]?.nome ?? "") : catTab;
     setEditing(null); setForm(emptyForm(cat)); setTaskOpen(true);
   }
   function openEdit(t: Tarefa) { setEditing(t); setForm(tarefaToForm(t)); setTaskOpen(true); }
 
   function openNovoProjeto(cat?: string) {
-    const c = cat ?? (catTab === "arquivo" ? (categorias[0]?.nome ?? "") : catTab);
+    const c = cat ?? ((catTab === "arquivo" || catTab === "todas") ? (categorias[0]?.nome ?? "") : catTab);
     setProjetoCat(c); setProjetoNome(""); setProjetoCor("#C8DA2D"); setProjetoOpen(true);
   }
 
@@ -355,6 +357,17 @@ export default function Tarefas() {
         </div>
       ) : (
         <div className="flex gap-0 border-b border-border overflow-x-auto">
+          <button
+            onClick={() => setCatTab("todas")}
+            className={cn(
+              "px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px whitespace-nowrap shrink-0",
+              catTab === "todas"
+                ? "border-[#C8DA2D] text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            )}
+          >
+            🗂️ Todas
+          </button>
           {categorias.map(cat => (
             <button
               key={cat.nome}
@@ -446,6 +459,7 @@ export default function Tarefas() {
                             key={t.id} tarefa={t}
                             isDragging={activeTask?.id === t.id}
                             overdue={isOverdue(t)}
+                            showCategoria={catTab === "todas"}
                             onEdit={() => openEdit(t)}
                             onDelete={() => deleteTarefa.mutate(t.id)}
                             onStatus={next => updateTarefa.mutate({ id: t.id, d: { status: next } })}
@@ -465,7 +479,7 @@ export default function Tarefas() {
               </div>
 
               <DragOverlay dropAnimation={null}>
-                {activeTask && <CardContent tarefa={activeTask} overlay />}
+                {activeTask && <CardContent tarefa={activeTask} overlay showCategoria={catTab === "todas"} />}
               </DragOverlay>
             </DndContext>
           )}
@@ -833,6 +847,7 @@ interface CardContentProps {
   tarefa: Tarefa;
   overlay?: boolean;
   overdue?: boolean;
+  showCategoria?: boolean;
   dragListeners?: Record<string, unknown>;
   onEdit?: () => void;
   onDelete?: () => void;
@@ -841,7 +856,7 @@ interface CardContentProps {
   onArchive?: () => void;
 }
 
-function CardContent({ tarefa, overlay, overdue, dragListeners, onEdit, onDelete, onStatus, onEngage, onArchive }: CardContentProps) {
+function CardContent({ tarefa, overlay, overdue, showCategoria, dragListeners, onEdit, onDelete, onStatus, onEngage, onArchive }: CardContentProps) {
   const prioridade = PRIORIDADES.find(p => p.value === tarefa.prioridade);
 
   return (
@@ -869,6 +884,11 @@ function CardContent({ tarefa, overlay, overdue, dragListeners, onEdit, onDelete
             {overdue && !overlay && (
               <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-red-500/15 text-red-400">
                 ⚠️ Atrasada
+              </span>
+            )}
+            {showCategoria && tarefa.categoria && (
+              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                {tarefa.categoria}
               </span>
             )}
             {prioridade && (

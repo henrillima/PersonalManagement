@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { addDays, addWeeks, subWeeks, startOfWeek, isSameDay, format } from "date-fns";
 import { ChevronLeft, ChevronRight, Plus, Calendar, Clock, AlertCircle } from "lucide-react";
 import { apiFetch } from "@/lib/api";
-import type { EventoAgenda } from "@/types";
+import type { EventoAgenda, Tarefa } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -57,14 +57,20 @@ export default function Rotina() {
   const [fGuests, setFGuests]   = useState("");
 
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
-  const today = new Date();
 
-  // ── Query ──────────────────────────────────────────────────────────────────
+  // ── Queries ────────────────────────────────────────────────────────────────
   const { data: eventos = [], isLoading, isError } = useQuery<EventoAgenda[]>({
     queryKey: ["agenda"],
     queryFn: () => apiFetch("/api/v1/agenda"),
     staleTime: 5 * 60 * 1000,
     retry: 1,
+  });
+
+  const { data: tarefas = [] } = useQuery<Tarefa[]>({
+    queryKey: ["tarefas"],
+    queryFn: () => apiFetch("/api/v1/tarefas"),
+    staleTime: 2 * 60 * 1000,
+    retry: false,
   });
 
   // ── Mutation ───────────────────────────────────────────────────────────────
@@ -94,6 +100,13 @@ export default function Rotina() {
       catch { return false; }
     });
   }
+
+  function tarefasForDay(day: Date) {
+    const dayStr = format(day, "yyyy-MM-dd");
+    return tarefas.filter(t => !t.arquivado && t.status !== "done" && t.data_limite === dayStr);
+  }
+
+  const today = new Date();
 
   function openCreate(day?: Date) {
     const d = day ? format(day, "yyyy-MM-dd") : format(new Date(), "yyyy-MM-dd");
@@ -180,6 +193,35 @@ export default function Rotina() {
               );
             })}
           </div>
+
+          {/* All-day tasks row */}
+          {days.some(d => tarefasForDay(d).length > 0) && (
+            <div className="flex border-b border-border bg-muted/20">
+              <div className="w-14 shrink-0 border-r border-border flex items-center justify-end pr-2">
+                <span className="text-[9px] text-muted-foreground uppercase tracking-wide">tarefas</span>
+              </div>
+              {days.map((day, i) => {
+                const dayTasks = tarefasForDay(day);
+                const isToday = isSameDay(day, today);
+                return (
+                  <div key={i} className={cn("flex-1 border-l border-border py-1 px-1 min-h-[28px] space-y-0.5", isToday && "bg-[#C8DA2D]/5")}>
+                    {dayTasks.map(t => {
+                      const overdue = t.data_limite && t.data_limite < format(today, "yyyy-MM-dd");
+                      return (
+                        <div key={t.id} title={t.titulo}
+                          className={cn(
+                            "text-[10px] px-1.5 py-0.5 rounded truncate font-medium",
+                            overdue ? "bg-red-500/20 text-red-400" : "bg-amber-500/20 text-amber-400"
+                          )}>
+                          {t.titulo}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
           {/* Time grid */}
           <div className="flex overflow-y-auto" style={{ maxHeight: "calc(100vh - 320px)", minHeight: 400 }}>
