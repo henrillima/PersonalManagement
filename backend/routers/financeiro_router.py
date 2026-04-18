@@ -436,7 +436,7 @@ def delete_divida(divida_id: str, _: str = Depends(verify_token)):
 # ══ DASHBOARD ════════════════════════════════════════════════════════════════
 
 @router.get("/financeiro-dashboard")
-def get_financeiro_dashboard(_: str = Depends(verify_token)):
+def get_financeiro_dashboard(dist_mes: Optional[str] = None, _: str = Depends(verify_token)):
     from datetime import date
     from collections import defaultdict
 
@@ -481,7 +481,7 @@ def get_financeiro_dashboard(_: str = Depends(verify_token)):
     try:
         terceiros_rows = (
             db.table("terceiros")
-            .select("mes_alvo, valor, recebido")
+            .select("mes_alvo, dia, valor, recebido")
             .gte("mes_alvo", months[0])
             .lte("mes_alvo", months[-1])
             .execute()
@@ -494,7 +494,7 @@ def get_financeiro_dashboard(_: str = Depends(verify_token)):
     try:
         dividas_rows = (
             db.table("dividas")
-            .select("mes, valor, pago")
+            .select("mes, dia, valor, pago")
             .gte("mes", months[0])
             .lte("mes", months[-1])
             .execute()
@@ -547,33 +547,88 @@ def get_financeiro_dashboard(_: str = Depends(verify_token)):
                 total += teto
         return total
 
-    # 6-month running projection with breakdown by source
+    # ── Forward-looking pre-computations (current month only) ────────────────
+    import calendar as cal
+    today_day = today.day
+    cur_mes = months[0]
+    _, days_in_cur_month = cal.monthrange(today.year, today.month)
+    # Days remaining including today (partial month proportion for variable costs)
+    days_remaining = days_in_cur_month - today_day + 1
+
+    # Which recorrentes are already paid this month
+    try:
+        pago_rec_cur: dict[str, bool] = {
+            p["recorrente_id"]: p["pago"]
+            for p in db.table("recorrentes_pagamentos")
+            .select("recorrente_id, pago")
+            .eq("mes", cur_mes)
+            .execute()
+            .data
+        }
+    except Exception:
+        pago_rec_cur = {}
+
+    # Faturas: only unpaid bills whose due date hasn't passed yet
+    try:
+        venc_map: dict[str, int] = {
+            c["cartao"]: c["vencimento"]
+            for c in db.table("faturas_cartoes").select("cartao, vencimento").execute().data
+        }
+        faturas_cur_val = round(sum(
+            float(f["valor"])
+            for f in db.table("faturas").select("cartao, valor, pago").eq("mes", cur_mes).execute().data
+            if not f.get("pago", False) and venc_map.get(f["cartao"], 999) >= today_day
+        ), 2)
+    except Exception:
+        faturas_cur_val = round(faturas_by_mes.get(cur_mes, 0.0), 2)
+
+    # ── 6-month projection — always forward-looking from today ────────────────
     saldo = saldo_atual
     projection = []
     for mes_str in months:
+        is_cur = mes_str == cur_mes
         rec_receita = 0.0
         pont_receita = 0.0
         terceiros_val = 0.0
         rec_despesa = 0.0
         pont_despesa = 0.0
         dividas_val = 0.0
-        faturas_val = round(faturas_by_mes.get(mes_str, 0.0), 2)
-        custo_vida_val = round(custo_vida_para_mes(mes_str), 2)
+
+        # Faturas: forward-looking for current month; full amount for future months
+        faturas_val = faturas_cur_val if is_cur else round(faturas_by_mes.get(mes_str, 0.0), 2)
+
+        # Custo de vida: proportional to remaining days in current month
+        raw_custo = custo_vida_para_mes(mes_str)
+        if is_cur:
+            custo_vida_val = round(raw_custo * days_remaining / days_in_cur_month, 2)
+        else:
+            custo_vida_val = round(raw_custo, 2)
 
         for r in recorrentes:
             inicio = r["inicio"]
             fim = r.get("fim")
             if inicio <= mes_str and (fim is None or fim >= mes_str):
+                dia = r.get("dia", 1)
                 valor = float(r["valor"])
+                if is_cur:
+                    if dia < today_day:
+                        continue  # already in the past this month
+                    if r["tipo"] == "Despesa" and pago_rec_cur.get(r["id"], False):
+                        continue  # already paid → already in saldo_atual
                 if r["tipo"] == "Receita":
                     rec_receita += valor
                 elif not r.get("via_cartao", False):
-                    # via_cartao=True → already counted in faturas_val, skip to avoid double-counting
                     rec_despesa += valor
 
         for p in pontuais:
             if p["mes_alvo"] == mes_str:
+                dia = p.get("dia", 1)
                 valor = float(p["valor"])
+                if is_cur:
+                    if dia < today_day:
+                        continue
+                    if p["tipo"] == "Despesa" and p.get("pago", False):
+                        continue
                 if p["tipo"] == "Receita":
                     pont_receita += valor
                 else:
@@ -581,11 +636,17 @@ def get_financeiro_dashboard(_: str = Depends(verify_token)):
 
         for t in terceiros_rows:
             if t["mes_alvo"] == mes_str and not t.get("recebido", False):
+                dia = t.get("dia", 1)
+                if is_cur and dia < today_day:
+                    continue
                 terceiros_val += float(t["valor"])
 
         for d in dividas_rows:
             d_mes = d["mes"][:7] if d["mes"] and len(d["mes"]) >= 7 else d["mes"]
             if d_mes == mes_str and not d.get("pago", False):
+                dia = d.get("dia", 1)
+                if is_cur and dia < today_day:
+                    continue
                 dividas_val += float(d["valor"])
 
         total_in  = rec_receita + pont_receita + terceiros_val
@@ -605,34 +666,42 @@ def get_financeiro_dashboard(_: str = Depends(verify_token)):
             "saldo": round(saldo, 2),
         })
 
-    # Expense distribution for current month — recorrentes + pontuais + gastos variáveis
-    cur_mes = months[0]
+    # ── Expense distribution — navigable by month ─────────────────────────────
+    dist_mes_final = dist_mes if dist_mes else cur_mes
     cat_map: dict[str, float] = defaultdict(float)
 
     for r in recorrentes:
         if r["tipo"] == "Despesa":
             inicio = r["inicio"]
             fim = r.get("fim")
-            if inicio <= cur_mes and (fim is None or fim >= cur_mes):
+            if inicio <= dist_mes_final and (fim is None or fim >= dist_mes_final):
                 cat = r.get("categoria") or "Outros"
                 cat_map[cat] += float(r["valor"])
 
-    for p in pontuais:
-        if p["tipo"] == "Despesa" and p["mes_alvo"] == cur_mes:
-            cat = p.get("categoria") or "Outros"
-            cat_map[cat] += float(p["valor"])
+    try:
+        dist_pontuais = (
+            db.table("fluxos_pontuais")
+            .select("tipo, categoria, valor")
+            .eq("mes_alvo", dist_mes_final)
+            .execute()
+            .data
+        )
+        for p in dist_pontuais:
+            if p["tipo"] == "Despesa":
+                cat_map[p.get("categoria") or "Outros"] += float(p["valor"])
+    except Exception:
+        pass
 
     try:
         gastos_var = (
             db.table("gastos_variaveis")
             .select("categoria, valor")
-            .eq("mes", cur_mes)
+            .eq("mes", dist_mes_final)
             .execute()
             .data
         )
         for g in gastos_var:
-            cat = g.get("categoria") or "Outros"
-            cat_map[cat] += float(g["valor"])
+            cat_map[g.get("categoria") or "Outros"] += float(g["valor"])
     except Exception:
         pass
 
@@ -645,4 +714,6 @@ def get_financeiro_dashboard(_: str = Depends(verify_token)):
         "saldo_atual": round(saldo_atual, 2),
         "projection": projection,
         "distribuicao_despesas": distribuicao,
+        "dist_mes": dist_mes_final,
+        "cur_mes": cur_mes,
     }

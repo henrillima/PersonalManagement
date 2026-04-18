@@ -1,6 +1,7 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { apiFetch, fmtBRL } from "@/lib/api";
-import { TrendingUp, TrendingDown, Wallet, Calendar, Info } from "lucide-react";
+import { apiFetch, fmtBRL, currentMes, mesLabel } from "@/lib/api";
+import { TrendingUp, TrendingDown, Wallet, Calendar, Info, ChevronLeft, ChevronRight } from "lucide-react";
 import {
   ComposedChart,
   Bar,
@@ -44,10 +45,8 @@ interface DashData {
   saldo_atual: number;
   projection: ProjectionPoint[];
   distribuicao_despesas: DistItem[];
-}
-
-function fetchDashboard() {
-  return apiFetch<DashData>("/api/v1/financeiro-dashboard");
+  dist_mes: string;
+  cur_mes: string;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -55,9 +54,16 @@ function fetchDashboard() {
 const MONTH_NAMES = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
 const PIE_COLORS = ["#C8DA2D","#4ade80","#60a5fa","#f87171","#a78bfa","#fb923c","#34d399","#818cf8","#f472b6","#facc15"];
 
-function formatMes(mes: string) {
+function addMonths(mes: string, delta: number): string {
+  const [y, m] = mes.split("-").map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function formatMes(mes: string, curMes?: string) {
   const p = mes.split("-");
-  return `${MONTH_NAMES[parseInt(p[1]) - 1]}/${p[0].slice(2)}`;
+  const base = `${MONTH_NAMES[parseInt(p[1]) - 1]}/${p[0].slice(2)}`;
+  return mes === curMes ? `▶ ${base}` : base;
 }
 
 function fmtK(v: number) {
@@ -164,10 +170,14 @@ function ProjectionTooltip({ active, payload, label }: any) {
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function FinanceiroDashboard() {
+  const [distMes, setDistMes] = useState(currentMes());
+
   const { data, isLoading, isError } = useQuery({
-    queryKey: ["financeiro-dashboard"],
-    queryFn: fetchDashboard,
+    queryKey: ["financeiro-dashboard", distMes],
+    queryFn: () => apiFetch<DashData>(`/api/v1/financeiro-dashboard?dist_mes=${distMes}`),
   });
+
+  const curMes = data?.cur_mes ?? currentMes();
 
   if (isLoading) {
     return <div className="text-muted-foreground text-sm py-16 text-center">Carregando dashboard…</div>;
@@ -243,16 +253,17 @@ export default function FinanceiroDashboard() {
       <div className="bg-card border border-border rounded-xl p-5">
         <div className="mb-5">
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-            Projeção de Caixa — próximos 6 meses
+            Projeção de Caixa — de hoje em diante
           </h2>
           <p className="text-xs text-muted-foreground mt-1">
-            Verde empilhado = entradas por fonte · Vermelho/laranja empilhado = saídas por tipo · Linha amarela = saldo projetado
+            ▶ Mês atual = apenas o que ainda está à frente (itens pagos e dias passados já estão no saldo).
+            Custo de vida proporcional aos dias restantes do mês.
           </p>
         </div>
         <ResponsiveContainer width="100%" height={340}>
           <ComposedChart data={projection} margin={{ top: 4, right: 12, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-            <XAxis dataKey="mes" tickFormatter={formatMes} {...axisProps} />
+            <XAxis dataKey="mes" tickFormatter={(mes) => formatMes(mes, curMes)} {...axisProps} />
             <YAxis {...axisProps} tickFormatter={fmtK} />
             <Tooltip content={<ProjectionTooltip />} />
             <Legend
@@ -290,9 +301,20 @@ export default function FinanceiroDashboard() {
 
         {/* Expense distribution pie */}
         <div className="bg-card border border-border rounded-xl p-5">
-          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-5">
-            Distribuição de Despesas (mês atual)
-          </h2>
+          <div className="flex items-center justify-between mb-5">
+            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+              Distribuição de Despesas
+            </h2>
+            <div className="flex items-center gap-1">
+              <button onClick={() => setDistMes(m => addMonths(m, -1))} className="p-1 rounded hover:bg-muted transition-colors">
+                <ChevronLeft size={14} />
+              </button>
+              <span className="text-xs font-semibold w-16 text-center">{mesLabel(distMes)}</span>
+              <button onClick={() => setDistMes(m => addMonths(m, 1))} className="p-1 rounded hover:bg-muted transition-colors">
+                <ChevronRight size={14} />
+              </button>
+            </div>
+          </div>
           {distribuicao_despesas.length === 0 ? (
             <p className="text-muted-foreground text-sm text-center py-10">
               Nenhuma despesa registrada para este mês
