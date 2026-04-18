@@ -13,6 +13,7 @@ class ItemCreate(BaseModel):
     unidade: str = "un"
     valor_esperado: Optional[float] = None
     categoria: Optional[str] = None
+    tipo: Optional[str] = "mercado"  # "mercado" | "desejo"
 
 
 class ItemUpdate(BaseModel):
@@ -22,6 +23,7 @@ class ItemUpdate(BaseModel):
     valor_esperado: Optional[float] = None
     categoria: Optional[str] = None
     comprado: Optional[bool] = None
+    tipo: Optional[str] = None
 
 
 @router.get("/lista-compras")
@@ -31,7 +33,7 @@ def list_items(_: str = Depends(verify_token)):
         .table("lista_compras")
         .select("*")
         .order("comprado")
-        .order("categoria", nulls_first=True)
+        .order("categoria", nullsfirst=True)
         .order("criado_em")
         .execute()
         .data

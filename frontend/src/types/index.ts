@@ -65,6 +65,7 @@ export interface ListaComprasItem {
   valor_esperado: number | null;
   categoria: string | null;
   comprado: boolean;
+  tipo: "mercado" | "desejo";
   criado_em: string;
 }
 

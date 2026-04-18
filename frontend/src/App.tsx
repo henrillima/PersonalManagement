@@ -4,6 +4,7 @@ import Login from "@/pages/Login";
 import Home from "@/pages/Home";
 import Tarefas from "@/pages/Tarefas";
 import FinanceiroLayout from "@/pages/Financeiro/Layout";
+import FinanceiroDashboard from "@/pages/Financeiro/Dashboard";
 import Caixa from "@/pages/Financeiro/Caixa";
 import Faturas from "@/pages/Financeiro/Faturas";
 import Recorrentes from "@/pages/Financeiro/Recorrentes";
@@ -33,7 +34,8 @@ export default function App() {
             <Route index element={<Home />} />
             <Route path="tarefas" element={<Tarefas />} />
             <Route path="financeiro" element={<FinanceiroLayout />}>
-              <Route index element={<Navigate to="caixa" replace />} />
+              <Route index element={<Navigate to="dashboard" replace />} />
+              <Route path="dashboard"      element={<FinanceiroDashboard />} />
               <Route path="caixa"          element={<Caixa />} />
               <Route path="faturas"        element={<Faturas />} />
               <Route path="recorrentes"    element={<Recorrentes />} />

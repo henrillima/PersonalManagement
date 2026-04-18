@@ -400,3 +400,104 @@ def update_divida(divida_id: str, body: DividaUpdate, _: str = Depends(verify_to
 @router.delete("/dividas/{divida_id}", status_code=204)
 def delete_divida(divida_id: str, _: str = Depends(verify_token)):
     get_db().table("dividas").delete().eq("id", divida_id).execute()
+
+
+# ══ DASHBOARD ════════════════════════════════════════════════════════════════
+
+@router.get("/financeiro-dashboard")
+def get_financeiro_dashboard(_: str = Depends(verify_token)):
+    from datetime import date
+    from collections import defaultdict
+
+    db = get_db()
+
+    # Current balance from latest caixa snapshot
+    snap_rows = (
+        db.table("caixa_snapshots")
+        .select("data, valor")
+        .order("data", desc=True)
+        .execute()
+        .data
+    )
+    saldo_atual = 0.0
+    if snap_rows:
+        latest_date = snap_rows[0]["data"]
+        saldo_atual = sum(float(r["valor"]) for r in snap_rows if r["data"] == latest_date)
+
+    # All recorrentes
+    recorrentes = db.table("fluxos_recorrentes").select("*").execute().data
+
+    # Build list of next 6 months (YYYY-MM)
+    today = date.today()
+    months = []
+    for i in range(6):
+        total_month = today.month - 1 + i
+        y = today.year + total_month // 12
+        m = total_month % 12 + 1
+        months.append(f"{y:04d}-{m:02d}")
+
+    # Pontuais for those months only
+    pontuais = (
+        db.table("fluxos_pontuais")
+        .select("*")
+        .gte("mes_alvo", months[0])
+        .lte("mes_alvo", months[-1])
+        .execute()
+        .data
+    )
+
+    # 6-month running projection
+    saldo = saldo_atual
+    projection = []
+    for mes_str in months:
+        receita = 0.0
+        despesa = 0.0
+        for r in recorrentes:
+            inicio = r["inicio"]
+            fim = r.get("fim")
+            if inicio <= mes_str and (fim is None or fim >= mes_str):
+                valor = float(r["valor"])
+                if r["tipo"] == "Receita":
+                    receita += valor
+                else:
+                    despesa += valor
+        for p in pontuais:
+            if p["mes_alvo"] == mes_str:
+                valor = float(p["valor"])
+                if p["tipo"] == "Receita":
+                    receita += valor
+                else:
+                    despesa += valor
+        saldo += receita - despesa
+        projection.append({
+            "mes": mes_str,
+            "receita": round(receita, 2),
+            "despesa": round(despesa, 2),
+            "saldo": round(saldo, 2),
+        })
+
+    # Expense distribution for current month
+    cur_mes = months[0]
+    cat_map: dict[str, float] = defaultdict(float)
+    for r in recorrentes:
+        if r["tipo"] == "Despesa":
+            inicio = r["inicio"]
+            fim = r.get("fim")
+            if inicio <= cur_mes and (fim is None or fim >= cur_mes):
+                cat = r.get("categoria") or "Outros"
+                cat_map[cat] += float(r["valor"])
+    for p in pontuais:
+        if p["tipo"] == "Despesa" and p["mes_alvo"] == cur_mes:
+            cat = p.get("categoria") or "Outros"
+            cat_map[cat] += float(p["valor"])
+
+    distribuicao = sorted(
+        [{"categoria": k, "valor": round(v, 2)} for k, v in cat_map.items()],
+        key=lambda x: -x["valor"],
+    )
+
+    return {
+        "saldo_atual": round(saldo_atual, 2),
+        "projection": projection,
+        "distribuicao_despesas": distribuicao,
+    }

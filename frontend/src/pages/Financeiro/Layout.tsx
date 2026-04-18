@@ -2,6 +2,7 @@ import { NavLink, Outlet } from "react-router-dom";
 import { cn } from "@/lib/utils";
 
 const tabs = [
+  { to: "/financeiro/dashboard",     label: "Dashboard"     },
   { to: "/financeiro/caixa",         label: "Contas"        },
   { to: "/financeiro/faturas",       label: "Faturas"       },
   { to: "/financeiro/recorrentes",   label: "Recorrentes"   },
