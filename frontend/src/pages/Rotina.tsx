@@ -1,39 +1,54 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { addDays, addWeeks, subWeeks, startOfWeek, isSameDay, format } from "date-fns";
-import { ChevronLeft, ChevronRight, Plus, Calendar, Clock, AlertCircle } from "lucide-react";
-import { apiFetch } from "@/lib/api";
-import type { EventoAgenda, Tarefa } from "@/types";
+import {
+  ChevronLeft, ChevronRight, Plus, Calendar, Clock,
+  AlertCircle, Trash2, Archive, Wallet,
+} from "lucide-react";
+import { apiFetch, fmtBRL, fmtDate } from "@/lib/api";
+import type {
+  EventoAgenda, Tarefa, FluxoPontual, FluxoRecorrente,
+  Frente, CategoriaItem, Prioridade, TarefaStatus,
+} from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
-} from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
-const HORA_INICIO = 6;
-const HORA_FIM    = 23;
-const CELL_H      = 56; // px por hora
-const HORAS       = Array.from({ length: HORA_FIM - HORA_INICIO }, (_, i) => i + HORA_INICIO);
 const DIAS_SEMANA = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
-const MESES       = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+const MESES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
 
-function fmtMes(d: Date) { return MESES[d.getMonth()]; }
+const PRIO_COR: Record<string, string>   = { alta: "#ef4444", media: "#f59e0b", baixa: "#60a5fa" };
+const PRIO_LABEL: Record<string, string> = { alta: "Alta",    media: "Média",   baixa: "Baixa"   };
+
+const PRIORIDADES: { value: Prioridade; label: string }[] = [
+  { value: "alta", label: "Alta" }, { value: "media", label: "Média" }, { value: "baixa", label: "Baixa" },
+];
+const STATUSES: { value: TarefaStatus; label: string }[] = [
+  { value: "todo", label: "A Fazer" }, { value: "in_progress", label: "Em Andamento" },
+  { value: "done", label: "Concluído" }, { value: "blocked", label: "Bloqueado" },
+];
+
+const TODAY_STR = new Date().toISOString().slice(0, 10);
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
 
 function fmtWeekLabel(start: Date) {
   const end = addDays(start, 6);
-  const ini = `${start.getDate()} ${fmtMes(start)}`;
-  const fim = `${end.getDate()} ${fmtMes(end)} ${end.getFullYear()}`;
-  return `${ini} – ${fim}`;
+  return `${start.getDate()} ${MESES[start.getMonth()]} – ${end.getDate()} ${MESES[end.getMonth()]} ${end.getFullYear()}`;
 }
 
 function fmtHora(d: Date) {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+function isOverdue(t: Tarefa) {
+  return t.status !== "done" && !!t.data_limite && t.data_limite < TODAY_STR;
 }
 
 // ── Main ───────────────────────────────────────────────────────────────────────
@@ -41,13 +56,14 @@ function fmtHora(d: Date) {
 export default function Rotina() {
   const qc = useQueryClient();
 
-  const [weekStart, setWeekStart] = useState(() =>
-    startOfWeek(new Date(), { weekStartsOn: 1 })
-  );
-  const [criarOpen, setCriarOpen] = useState(false);
-  const [selected, setSelected]   = useState<EventoAgenda | null>(null);
+  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }));
 
-  // Form state
+  // Dialogs
+  const [criarOpen, setCriarOpen]           = useState(false);
+  const [selectedEvento, setSelectedEvento] = useState<EventoAgenda | null>(null);
+  const [editingTarefa, setEditingTarefa]   = useState<Tarefa | null>(null);
+
+  // New event form
   const [fTitulo, setFTitulo]   = useState("");
   const [fDataIni, setFDataIni] = useState(format(new Date(), "yyyy-MM-dd"));
   const [fHoraIni, setFHoraIni] = useState("09:00");
@@ -56,24 +72,59 @@ export default function Rotina() {
   const [fDesc, setFDesc]       = useState("");
   const [fGuests, setFGuests]   = useState("");
 
-  const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+  // Task edit form
+  const [tForm, setTForm] = useState({
+    titulo: "", descricao: "", categoria: "", frente_id: "",
+    prioridade: "media" as Prioridade, status: "todo" as TarefaStatus,
+    data_limite: "", observacao: "",
+  });
 
-  // ── Queries ────────────────────────────────────────────────────────────────
-  const { data: eventos = [], isLoading, isError } = useQuery<EventoAgenda[]>({
+  const today = new Date();
+  const days  = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
+
+  // ── Queries ───────────────────────────────────────────────────────────────────
+
+  const { data: eventos = [], isError: isErrorAgenda } = useQuery<EventoAgenda[]>({
     queryKey: ["agenda"],
-    queryFn: () => apiFetch("/api/v1/agenda"),
+    queryFn:  () => apiFetch("/api/v1/agenda"),
     staleTime: 5 * 60 * 1000,
     retry: 1,
   });
 
   const { data: tarefas = [] } = useQuery<Tarefa[]>({
     queryKey: ["tarefas"],
-    queryFn: () => apiFetch("/api/v1/tarefas"),
+    queryFn:  () => apiFetch("/api/v1/tarefas"),
     staleTime: 2 * 60 * 1000,
+  });
+
+  const { data: recorrentes = [] } = useQuery<FluxoRecorrente[]>({
+    queryKey: ["fluxos-recorrentes"],
+    queryFn:  () => apiFetch("/api/v1/recorrentes"),
+    staleTime: 10 * 60 * 1000,
     retry: false,
   });
 
-  // ── Mutation ───────────────────────────────────────────────────────────────
+  const { data: pontuais = [] } = useQuery<FluxoPontual[]>({
+    queryKey: ["fluxos-pontuais"],
+    queryFn:  () => apiFetch("/api/v1/pontuais"),
+    staleTime: 10 * 60 * 1000,
+    retry: false,
+  });
+
+  const { data: frentes = [] } = useQuery<Frente[]>({
+    queryKey: ["frentes"],
+    queryFn:  () => apiFetch("/api/v1/frentes"),
+    staleTime: 10 * 60 * 1000,
+  });
+
+  const { data: categorias = [] } = useQuery<CategoriaItem[]>({
+    queryKey: ["categorias"],
+    queryFn:  () => apiFetch("/api/v1/categorias"),
+    staleTime: 10 * 60 * 1000,
+  });
+
+  // ── Mutations ─────────────────────────────────────────────────────────────────
+
   const createEvento = useMutation({
     mutationFn: (d: object) => apiFetch("/api/v1/agenda", { method: "POST", body: JSON.stringify(d) }),
     onSuccess: () => {
@@ -83,30 +134,86 @@ export default function Rotina() {
     },
   });
 
-  function handleSave() {
-    if (!fTitulo.trim()) return;
-    createEvento.mutate({
-      title: fTitulo,
-      start: `${fDataIni}T${fHoraIni}:00`,
-      end:   `${fDataFim}T${fHoraFim}:00`,
-      description: fDesc || undefined,
-      guests: fGuests || undefined,
-    });
-  }
+  const updateTarefa = useMutation({
+    mutationFn: ({ id, d }: { id: string; d: object }) =>
+      apiFetch(`/api/v1/tarefas/${id}`, { method: "PATCH", body: JSON.stringify(d) }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["tarefas"] });
+      qc.invalidateQueries({ queryKey: ["home-resumo"] });
+      setEditingTarefa(null);
+    },
+  });
+
+  const deleteTarefa = useMutation({
+    mutationFn: (id: string) => apiFetch(`/api/v1/tarefas/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["tarefas"] });
+      setEditingTarefa(null);
+    },
+  });
+
+  // ── Per-day helpers ───────────────────────────────────────────────────────────
 
   function eventosForDay(day: Date) {
-    return eventos.filter(ev => {
-      try { return isSameDay(new Date(ev.start), day); }
-      catch { return false; }
-    });
+    return eventos
+      .filter(ev => { try { return isSameDay(new Date(ev.start), day); } catch { return false; } })
+      .sort((a, b) => a.start.localeCompare(b.start));
   }
 
   function tarefasForDay(day: Date) {
     const dayStr = format(day, "yyyy-MM-dd");
-    return tarefas.filter(t => !t.arquivado && t.status !== "done" && t.data_limite === dayStr);
+    return tarefas
+      .filter(t => !t.arquivado && t.status !== "done" && t.data_limite === dayStr)
+      .sort((a, b) => {
+        if (isOverdue(a) && !isOverdue(b)) return -1;
+        if (!isOverdue(a) && isOverdue(b)) return 1;
+        const ord = { alta: 0, media: 1, baixa: 2 };
+        return (ord[a.prioridade] ?? 1) - (ord[b.prioridade] ?? 1);
+      });
   }
 
-  const today = new Date();
+  type DespesaItem = { id: string; descricao: string; valor: number; categoria: string; tipo: "pontual" | "recorrente" };
+
+  function despesasForDay(day: Date): DespesaItem[] {
+    const dayNum   = day.getDate();
+    const monthStr = format(day, "yyyy-MM");
+
+    const pts = pontuais
+      .filter(p => p.tipo === "Despesa" && p.dia === dayNum && p.mes_alvo === monthStr)
+      .map(p => ({ id: p.id, descricao: p.descricao, valor: p.valor, categoria: p.categoria, tipo: "pontual" as const }));
+
+    const recs = recorrentes
+      .filter(r => r.tipo === "Despesa" && r.dia === dayNum && r.inicio <= monthStr && (!r.fim || r.fim >= monthStr))
+      .map(r => ({ id: r.id, descricao: r.descricao, valor: r.valor, categoria: r.categoria, tipo: "recorrente" as const }));
+
+    return [...pts, ...recs];
+  }
+
+  // ── Task edit dialog helpers ───────────────────────────────────────────────────
+
+  function openEditTarefa(t: Tarefa) {
+    setTForm({
+      titulo: t.titulo, descricao: t.descricao ?? "",
+      categoria: t.categoria, frente_id: t.frente_id ?? "",
+      prioridade: t.prioridade, status: t.status,
+      data_limite: t.data_limite ?? "", observacao: t.observacao ?? "",
+    });
+    setEditingTarefa(t);
+  }
+
+  function handleSaveTarefa() {
+    if (!editingTarefa || !tForm.titulo.trim()) return;
+    updateTarefa.mutate({ id: editingTarefa.id, d: {
+      titulo: tForm.titulo,
+      descricao: tForm.descricao || undefined,
+      categoria: tForm.categoria,
+      frente_id: tForm.frente_id || undefined,
+      prioridade: tForm.prioridade,
+      status: tForm.status,
+      data_limite: tForm.data_limite || undefined,
+      observacao: tForm.observacao || undefined,
+    }});
+  }
 
   function openCreate(day?: Date) {
     const d = day ? format(day, "yyyy-MM-dd") : format(new Date(), "yyyy-MM-dd");
@@ -116,13 +223,15 @@ export default function Rotina() {
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
+
   return (
     <div className="space-y-5">
+
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">Agenda</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Integração Google Calendar</p>
+          <h1 className="text-2xl font-semibold">Semana</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">Compromissos, tarefas e pagamentos em um só lugar</p>
         </div>
         <Button onClick={() => openCreate()} className="bg-[#C8DA2D] text-[#0C1923] hover:bg-[#d4e640]">
           <Plus size={14} className="mr-1" /> Novo Compromisso
@@ -131,186 +240,145 @@ export default function Rotina() {
 
       {/* Week navigation */}
       <div className="flex items-center gap-2">
-        <button
-          onClick={() => setWeekStart(w => subWeeks(w, 1))}
-          className="p-1.5 rounded-lg border border-border hover:bg-muted transition-colors"
-        >
+        <button onClick={() => setWeekStart(w => subWeeks(w, 1))}
+          className="p-1.5 rounded-lg border border-border hover:bg-muted transition-colors">
           <ChevronLeft size={16} />
         </button>
-        <span className="text-sm font-medium min-w-[180px] text-center">
-          {fmtWeekLabel(weekStart)}
-        </span>
-        <button
-          onClick={() => setWeekStart(w => addWeeks(w, 1))}
-          className="p-1.5 rounded-lg border border-border hover:bg-muted transition-colors"
-        >
+        <span className="text-sm font-medium min-w-[190px] text-center">{fmtWeekLabel(weekStart)}</span>
+        <button onClick={() => setWeekStart(w => addWeeks(w, 1))}
+          className="p-1.5 rounded-lg border border-border hover:bg-muted transition-colors">
           <ChevronRight size={16} />
         </button>
-        <button
-          onClick={() => setWeekStart(startOfWeek(new Date(), { weekStartsOn: 1 }))}
-          className="ml-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors"
-        >
+        <button onClick={() => setWeekStart(startOfWeek(new Date(), { weekStartsOn: 1 }))}
+          className="ml-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors">
           Hoje
         </button>
+        <div className="ml-auto flex gap-4 text-xs text-muted-foreground">
+          <span className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-sm bg-blue-600 inline-block shrink-0" /> Compromisso
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-sm bg-card border border-border inline-block shrink-0" /> Tarefa
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-sm bg-red-500/20 border border-red-500/30 inline-block shrink-0" /> Despesa
+          </span>
+        </div>
       </div>
 
-      {/* Error state */}
-      {isError && (
+      {/* Calendar error */}
+      {isErrorAgenda && (
         <div className="flex items-center gap-2 text-sm text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-xl px-4 py-3">
-          <AlertCircle size={15} />
-          Não foi possível carregar a agenda. Verifique a integração com o Google Calendar.
+          <AlertCircle size={15} /> Não foi possível carregar a agenda do Google Calendar.
         </div>
       )}
 
-      {/* Calendar */}
-      {isLoading ? (
-        <CalendarSkeleton />
-      ) : (
-        <div className="bg-card border border-border rounded-xl overflow-hidden">
-          {/* Day headers */}
-          <div className="flex border-b border-border sticky top-0 bg-card z-10">
-            <div className="w-14 shrink-0" />
-            {days.map((day, i) => {
-              const isToday = isSameDay(day, today);
-              return (
+      {/* 7-column week grid */}
+      <div className="overflow-x-auto pb-4">
+        <div className="grid grid-cols-7 gap-2 min-w-[700px]">
+          {days.map((day, i) => {
+            const isToday     = isSameDay(day, today);
+            const dayEvs      = eventosForDay(day);
+            const dayTarefas  = tarefasForDay(day);
+            const dayDespesas = despesasForDay(day);
+            const totalItems  = dayEvs.length + dayTarefas.length + dayDespesas.length;
+
+            return (
+              <div key={i} className="flex flex-col gap-1.5">
+
+                {/* Day header */}
                 <button
-                  key={i}
                   onClick={() => openCreate(day)}
                   className={cn(
-                    "flex-1 text-center py-3 border-l border-border transition-colors hover:bg-muted/50",
-                    isToday && "bg-[#C8DA2D]/8"
+                    "flex flex-col items-center py-2.5 px-1 rounded-xl border transition-all hover:bg-muted/50",
+                    isToday
+                      ? "bg-[#C8DA2D]/10 border-[#C8DA2D]/40 shadow-sm"
+                      : "border-border"
                   )}
                 >
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide">{DIAS_SEMANA[i]}</p>
-                  <p className={cn(
-                    "text-lg font-semibold leading-tight",
+                  <span className="text-[9px] font-semibold text-muted-foreground uppercase tracking-widest">
+                    {DIAS_SEMANA[i]}
+                  </span>
+                  <span className={cn(
+                    "text-xl font-bold leading-tight mt-0.5",
                     isToday ? "text-[#C8DA2D]" : "text-foreground"
                   )}>
                     {day.getDate()}
-                  </p>
-                  <p className="text-[10px] text-muted-foreground">{fmtMes(day)}</p>
+                  </span>
+                  <span className="text-[9px] text-muted-foreground">{MESES[day.getMonth()]}</span>
+                  {totalItems > 0 && (
+                    <span className={cn(
+                      "mt-1 text-[9px] font-semibold px-1.5 py-0.5 rounded-full",
+                      isToday ? "bg-[#C8DA2D]/20 text-[#C8DA2D]" : "bg-muted text-muted-foreground"
+                    )}>
+                      {totalItems}
+                    </span>
+                  )}
                 </button>
-              );
-            })}
-          </div>
 
-          {/* All-day tasks row */}
-          {days.some(d => tarefasForDay(d).length > 0) && (
-            <div className="flex border-b border-border bg-muted/20">
-              <div className="w-14 shrink-0 border-r border-border flex items-center justify-end pr-2">
-                <span className="text-[9px] text-muted-foreground uppercase tracking-wide">tarefas</span>
-              </div>
-              {days.map((day, i) => {
-                const dayTasks = tarefasForDay(day);
-                const isToday = isSameDay(day, today);
-                return (
-                  <div key={i} className={cn("flex-1 border-l border-border py-1 px-1 min-h-[28px] space-y-0.5", isToday && "bg-[#C8DA2D]/5")}>
-                    {dayTasks.map(t => {
-                      const overdue = t.data_limite && t.data_limite < format(today, "yyyy-MM-dd");
-                      return (
-                        <div key={t.id} title={t.titulo}
-                          className={cn(
-                            "text-[10px] px-1.5 py-0.5 rounded truncate font-medium",
-                            overdue ? "bg-red-500/20 text-red-400" : "bg-amber-500/20 text-amber-400"
-                          )}>
-                          {t.titulo}
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* Time grid */}
-          <div className="flex overflow-y-auto" style={{ maxHeight: "calc(100vh - 320px)", minHeight: 400 }}>
-            {/* Time labels */}
-            <div className="w-14 shrink-0 border-r border-border">
-              {HORAS.map(h => (
-                <div key={h} style={{ height: CELL_H }} className="flex items-start justify-end pr-2 pt-1 border-b border-border/20">
-                  <span className="text-[10px] text-muted-foreground">{h}:00</span>
-                </div>
-              ))}
-            </div>
-
-            {/* Day columns */}
-            {days.map((day, i) => {
-              const isToday = isSameDay(day, today);
-              const dayEvs  = eventosForDay(day);
-              const totalH  = CELL_H * HORAS.length;
-
-              return (
-                <div
-                  key={i}
-                  className={cn("flex-1 relative border-l border-border", isToday && "bg-[#C8DA2D]/5")}
-                  style={{ height: totalH }}
-                >
-                  {/* Hour lines */}
-                  {HORAS.map(h => (
-                    <div key={h} style={{ height: CELL_H }} className="border-b border-border/20" />
-                  ))}
-
-                  {/* Current time indicator */}
-                  {isToday && (() => {
-                    const now = new Date();
-                    const top = ((now.getHours() - HORA_INICIO) * 60 + now.getMinutes()) / 60 * CELL_H;
-                    if (top < 0 || top > totalH) return null;
-                    return (
-                      <div
-                        style={{ top, position: "absolute", left: 0, right: 0 }}
-                        className="flex items-center z-20 pointer-events-none"
-                      >
-                        <div className="w-2 h-2 rounded-full bg-red-500 shrink-0 -ml-1" />
-                        <div className="flex-1 h-px bg-red-500" />
-                      </div>
-                    );
-                  })()}
+                {/* Cards */}
+                <div className="flex flex-col gap-1">
 
                   {/* Events */}
                   {dayEvs.map(ev => (
-                    <EventoCard
-                      key={ev.id}
-                      evento={ev}
-                      onClick={() => setSelected(ev)}
-                    />
+                    <EventoCard key={ev.id} evento={ev} onClick={() => setSelectedEvento(ev)} />
                   ))}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
-      {/* Event detail dialog */}
-      <Dialog open={!!selected} onOpenChange={() => setSelected(null)}>
+                  {/* Tasks */}
+                  {dayTarefas.map(t => (
+                    <TarefaCard key={t.id} tarefa={t} onClick={() => openEditTarefa(t)} />
+                  ))}
+
+                  {/* Expenses */}
+                  {dayDespesas.map(d => (
+                    <DespesaCard key={d.id} despesa={d} />
+                  ))}
+
+                  {/* Empty */}
+                  {totalItems === 0 && (
+                    <div className="h-12 rounded-lg border border-dashed border-border/30" />
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── Dialogs ─────────────────────────────────────────────────────────────── */}
+
+      {/* Event detail */}
+      <Dialog open={!!selectedEvento} onOpenChange={() => setSelectedEvento(null)}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Calendar size={16} className="text-[#C8DA2D]" />
-              {selected?.title}
+              {selectedEvento?.title}
             </DialogTitle>
           </DialogHeader>
-          {selected && (
+          {selectedEvento && (
             <div className="space-y-2 py-2">
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Clock size={14} />
                 <span>
-                  {fmtHora(new Date(selected.start))} – {fmtHora(new Date(selected.end))}
+                  {fmtHora(new Date(selectedEvento.start))} – {fmtHora(new Date(selectedEvento.end))}
                 </span>
               </div>
-              {selected.description && (
-                <p className="text-sm text-muted-foreground">{selected.description}</p>
+              <p className="text-xs text-muted-foreground">
+                {fmtDate(selectedEvento.start.slice(0, 10))}
+              </p>
+              {selectedEvento.description && (
+                <p className="text-sm text-muted-foreground mt-1">{selectedEvento.description}</p>
               )}
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setSelected(null)}>Fechar</Button>
+            <Button variant="outline" onClick={() => setSelectedEvento(null)}>Fechar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Create event dialog */}
+      {/* New event */}
       <Dialog open={criarOpen} onOpenChange={setCriarOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>Novo Compromisso</DialogTitle></DialogHeader>
@@ -321,22 +389,18 @@ export default function Rotina() {
                 placeholder="Ex: Reunião com cliente" className="mt-1" />
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label>Data início</Label>
+              <div><Label>Data início</Label>
                 <Input type="date" value={fDataIni} onChange={e => setFDataIni(e.target.value)} className="mt-1" />
               </div>
-              <div>
-                <Label>Hora início</Label>
+              <div><Label>Hora início</Label>
                 <Input type="time" value={fHoraIni} onChange={e => setFHoraIni(e.target.value)} className="mt-1" />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label>Data fim</Label>
+              <div><Label>Data fim</Label>
                 <Input type="date" value={fDataFim} onChange={e => setFDataFim(e.target.value)} className="mt-1" />
               </div>
-              <div>
-                <Label>Hora fim</Label>
+              <div><Label>Hora fim</Label>
                 <Input type="time" value={fHoraFim} onChange={e => setFHoraFim(e.target.value)} className="mt-1" />
               </div>
             </div>
@@ -345,14 +409,19 @@ export default function Rotina() {
               <Textarea value={fDesc} onChange={e => setFDesc(e.target.value)} rows={2} className="mt-1" />
             </div>
             <div>
-              <Label>Convidados (e-mails separados por vírgula)</Label>
+              <Label>Convidados (e-mails, separados por vírgula)</Label>
               <Input value={fGuests} onChange={e => setFGuests(e.target.value)}
                 placeholder="email@exemplo.com, ..." className="mt-1" />
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCriarOpen(false)}>Cancelar</Button>
-            <Button onClick={handleSave}
+            <Button
+              onClick={() => createEvento.mutate({
+                title: fTitulo, start: `${fDataIni}T${fHoraIni}:00`,
+                end: `${fDataFim}T${fHoraFim}:00`,
+                description: fDesc || undefined, guests: fGuests || undefined,
+              })}
               disabled={!fTitulo.trim() || createEvento.isPending}
               className="bg-[#C8DA2D] text-[#0C1923] hover:bg-[#d4e640]">
               {createEvento.isPending ? "Sincronizando..." : "Sincronizar"}
@@ -360,62 +429,196 @@ export default function Rotina() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Task edit dialog */}
+      <Dialog open={!!editingTarefa} onOpenChange={(o) => { if (!o) setEditingTarefa(null); }}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Editar Tarefa</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-1">
+            <div>
+              <Label>Título *</Label>
+              <Input value={tForm.titulo} onChange={e => setTForm(f => ({ ...f, titulo: e.target.value }))}
+                placeholder="Título da tarefa..." className="mt-1" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Categoria</Label>
+                <Select value={tForm.categoria}
+                  onValueChange={v => setTForm(f => ({ ...f, categoria: v, frente_id: "" }))}>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {categorias.map(c => (
+                      <SelectItem key={c.id} value={c.nome}>{c.emoji} {c.nome}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Prioridade</Label>
+                <Select value={tForm.prioridade} onValueChange={v => setTForm(f => ({ ...f, prioridade: v as Prioridade }))}>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {PRIORIDADES.map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Status</Label>
+                <Select value={tForm.status} onValueChange={v => setTForm(f => ({ ...f, status: v as TarefaStatus }))}>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {STATUSES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Projeto</Label>
+                <Select value={tForm.frente_id || "none"}
+                  onValueChange={v => setTForm(f => ({ ...f, frente_id: v === "none" ? "" : v }))}>
+                  <SelectTrigger className="mt-1"><SelectValue placeholder="Sem projeto" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Sem projeto</SelectItem>
+                    {frentes
+                      .filter(fr => fr.categoria === tForm.categoria)
+                      .map(fr => <SelectItem key={fr.id} value={fr.id}>{fr.nome}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div>
+              <Label>Data limite</Label>
+              <Input type="date" value={tForm.data_limite}
+                onChange={e => setTForm(f => ({ ...f, data_limite: e.target.value }))} className="mt-1" />
+            </div>
+            <div>
+              <Label>Descrição</Label>
+              <Textarea value={tForm.descricao}
+                onChange={e => setTForm(f => ({ ...f, descricao: e.target.value }))} rows={3} className="mt-1" />
+            </div>
+            <div>
+              <Label>Observações</Label>
+              <Textarea value={tForm.observacao}
+                onChange={e => setTForm(f => ({ ...f, observacao: e.target.value }))} rows={2} className="mt-1" />
+            </div>
+
+            {/* Actions */}
+            <div className="pt-2 border-t border-border flex items-center justify-between">
+              <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-600 hover:bg-red-50"
+                onClick={() => editingTarefa && deleteTarefa.mutate(editingTarefa.id)}>
+                <Trash2 size={14} className="mr-1" /> Excluir
+              </Button>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm"
+                  onClick={() => editingTarefa && updateTarefa.mutate({
+                    id: editingTarefa.id, d: { arquivado: true, tipo_arquivo: "engavetada" }
+                  })}>
+                  <Clock size={13} className="mr-1" /> Engavetar
+                </Button>
+                <Button variant="outline" size="sm"
+                  onClick={() => editingTarefa && updateTarefa.mutate({
+                    id: editingTarefa.id, d: { arquivado: true, tipo_arquivo: "arquivo" }
+                  })}>
+                  <Archive size={13} className="mr-1" /> Arquivar
+                </Button>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingTarefa(null)}>Cancelar</Button>
+            <Button
+              onClick={handleSaveTarefa}
+              disabled={!tForm.titulo.trim() || updateTarefa.isPending}
+              className="bg-[#C8DA2D] text-[#0C1923] hover:bg-[#d4e640]">
+              Salvar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
 }
 
-// ── EventoCard ─────────────────────────────────────────────────────────────────
+// ── Card sub-components ────────────────────────────────────────────────────────
 
 function EventoCard({ evento, onClick }: { evento: EventoAgenda; onClick: () => void }) {
+  let timeLabel = "";
+  let endLabel  = "";
   try {
-    const start = new Date(evento.start);
-    const end   = new Date(evento.end);
-    const startMin = (start.getHours() - HORA_INICIO) * 60 + start.getMinutes();
-    const durMin   = (end.getTime() - start.getTime()) / 60000;
-    const top    = (startMin / 60) * CELL_H;
-    const height = Math.max((durMin / 60) * CELL_H, 22);
+    const s = new Date(evento.start);
+    const e = new Date(evento.end);
+    timeLabel = `${String(s.getHours()).padStart(2,"0")}:${String(s.getMinutes()).padStart(2,"0")}`;
+    endLabel  = `${String(e.getHours()).padStart(2,"0")}:${String(e.getMinutes()).padStart(2,"0")}`;
+  } catch {}
 
-    if (top < 0 || top > CELL_H * HORAS.length) return null;
-
-    return (
-      <div
-        onClick={onClick}
-        style={{ top, height, position: "absolute", left: 2, right: 2 }}
-        className="bg-blue-600 border border-blue-700 rounded px-1.5 py-1 overflow-hidden cursor-pointer hover:bg-blue-500 transition-colors z-10 shadow-sm"
-      >
-        <p className="text-[11px] font-semibold text-white truncate leading-tight">{evento.title}</p>
-        {height > 30 && (
-          <p className="text-[10px] text-blue-100/80">{fmtHora(start)} – {fmtHora(end)}</p>
-        )}
-      </div>
-    );
-  } catch {
-    return null;
-  }
+  return (
+    <div onClick={onClick}
+      className="bg-blue-600 border border-blue-700 rounded-lg px-2 py-1.5 cursor-pointer hover:bg-blue-500 transition-colors shadow-sm">
+      <p className="text-[10px] text-blue-100/80 tabular-nums leading-none mb-0.5">
+        {timeLabel}{endLabel ? ` – ${endLabel}` : ""}
+      </p>
+      <p className="text-xs font-semibold text-white truncate leading-snug">{evento.title}</p>
+    </div>
+  );
 }
 
-// ── Skeleton ───────────────────────────────────────────────────────────────────
+function TarefaCard({ tarefa, onClick }: { tarefa: Tarefa; onClick: () => void }) {
+  const overdue = isOverdue(tarefa);
+  const cor     = PRIO_COR[tarefa.prioridade] ?? "#94a3b8";
 
-function CalendarSkeleton() {
   return (
-    <div className="bg-card border border-border rounded-xl overflow-hidden">
-      <div className="flex border-b border-border">
-        <div className="w-14 shrink-0" />
-        {[...Array(7)].map((_, i) => (
-          <div key={i} className="flex-1 py-3 px-2 border-l border-border">
-            <Skeleton className="h-3 w-8 mx-auto mb-1" />
-            <Skeleton className="h-6 w-6 mx-auto" />
-          </div>
-        ))}
+    <div onClick={onClick} className={cn(
+      "bg-card border rounded-lg px-2 py-1.5 cursor-pointer transition-all hover:shadow-sm group",
+      overdue ? "border-red-500/50 bg-red-500/5 hover:border-red-500/70" : "border-border hover:border-[#C8DA2D]/60"
+    )}>
+      {overdue && (
+        <p className="text-[9px] font-bold text-red-400 leading-none mb-0.5">⚠ Atrasada</p>
+      )}
+      <p className="text-xs font-medium truncate leading-snug">{tarefa.titulo}</p>
+      <div className="flex gap-1 mt-1 flex-wrap">
+        <span className="text-[9px] font-semibold px-1 py-0.5 rounded shrink-0"
+          style={{ backgroundColor: cor + "25", color: cor }}>
+          {PRIO_LABEL[tarefa.prioridade]}
+        </span>
+        {tarefa.frente_nome && (
+          <span className="text-[9px] px-1 py-0.5 rounded font-medium shrink-0"
+            style={{
+              backgroundColor: (tarefa.frente_cor ?? "#94a3b8") + "25",
+              color: tarefa.frente_cor ?? "#94a3b8",
+            }}>
+            {tarefa.frente_nome}
+          </span>
+        )}
+        {tarefa.categoria && (
+          <span className="text-[9px] px-1 py-0.5 rounded bg-muted text-muted-foreground shrink-0">
+            {tarefa.categoria}
+          </span>
+        )}
       </div>
-      <div className="flex" style={{ height: 400 }}>
-        <div className="w-14 shrink-0 border-r border-border space-y-0">
-          {[...Array(8)].map((_, i) => <Skeleton key={i} className="h-14 rounded-none" />)}
-        </div>
-        <div className="flex-1 p-4 space-y-3">
-          {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-10 rounded-lg" />)}
-        </div>
+    </div>
+  );
+}
+
+function DespesaCard({ despesa }: {
+  despesa: { id: string; descricao: string; valor: number; categoria: string; tipo: string };
+}) {
+  return (
+    <div className="bg-red-500/8 border border-red-500/20 rounded-lg px-2 py-1.5">
+      <div className="flex items-baseline justify-between gap-1 mb-0.5">
+        <span className="text-[9px] text-muted-foreground truncate">{despesa.categoria}</span>
+        <span className="text-[10px] font-bold text-red-400 shrink-0 tabular-nums">
+          <Wallet size={9} className="inline mr-0.5" />
+          {fmtBRL(despesa.valor)}
+        </span>
       </div>
+      <p className="text-xs truncate leading-snug">{despesa.descricao}</p>
+      <p className="text-[9px] text-muted-foreground mt-0.5">
+        {despesa.tipo === "recorrente" ? "Recorrente" : "Pontual"}
+      </p>
     </div>
   );
 }
