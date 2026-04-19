@@ -21,6 +21,7 @@ import {
 import { cn } from "@/lib/utils";
 
 const financeiroLinks = [
+  { to: "/financeiro/dashboard",     icon: TrendingUp,    label: "Dashboard"     },
   { to: "/financeiro/caixa",         icon: Building2,     label: "Contas"        },
   { to: "/financeiro/faturas",       icon: CreditCard,    label: "Faturas"       },
   { to: "/financeiro/recorrentes",   icon: RefreshCw,     label: "Recorrentes"   },

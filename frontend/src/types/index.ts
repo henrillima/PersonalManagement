@@ -180,6 +180,13 @@ export interface OrcamentoResponse {
 
 // ── Financeiro: Investimentos ─────────────────────────────────────────────────
 
+export interface Corretora {
+  id: string;
+  nome: string;
+  cor: string;
+  criado_em: string;
+}
+
 export interface Aporte {
   id: string;
   mes: string;
@@ -187,6 +194,9 @@ export interface Aporte {
   classe: string;
   ativo: string;
   valor: number;
+  corretora_id: string | null;
+  corretora_nome: string | null;
+  corretora_cor: string | null;
   criado_em: string;
 }
 
@@ -206,17 +216,28 @@ export interface PlanoInvestimentoResponse {
   tatico: PlanoTaticoItem[];
 }
 
+// ── Financeiro: Pessoas / Contatos ────────────────────────────────────────────
+
+export interface Pessoa {
+  id: string;
+  nome: string;
+  telefone: string | null;
+  criado_em: string;
+}
+
 // ── Financeiro: Terceiros ─────────────────────────────────────────────────────
 
 export interface Terceiro {
   id: string;
   pessoa: string;
+  direcao: "a_receber" | "a_pagar";
   origem: "pix" | "cartao";
   descricao: string;
   mes_alvo: string;
   dia: number;
   valor: number;
   recebido: boolean;
+  pago: boolean;
   criado_em: string;
 }
 

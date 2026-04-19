@@ -309,17 +309,23 @@ class AporteCreate(BaseModel):
     classe: str
     ativo: str
     valor: float
+    corretora_id: Optional[str] = None
 
 @router.get("/aportes")
 def list_aportes(mes: Optional[str] = None, _: str = Depends(verify_token)):
-    q = get_db().table("aportes").select("*").order("dia")
+    q = get_db().table("aportes").select("*, corretoras(nome, cor)").order("dia")
     if mes:
         q = q.eq("mes", mes)
-    return q.execute().data
+    rows = q.execute().data
+    for r in rows:
+        cor_obj = r.pop("corretoras", None) or {}
+        r["corretora_nome"] = cor_obj.get("nome")
+        r["corretora_cor"]  = cor_obj.get("cor")
+    return rows
 
 @router.post("/aportes", status_code=201)
 def create_aporte(body: AporteCreate, _: str = Depends(verify_token)):
-    row = get_db().table("aportes").insert(body.model_dump()).execute().data
+    row = get_db().table("aportes").insert(body.model_dump(exclude_none=True)).execute().data
     return row[0] if row else {}
 
 @router.delete("/aportes/{aporte_id}", status_code=204)
@@ -366,7 +372,8 @@ def delete_plano_inv(inv_id: str, _: str = Depends(verify_token)):
 
 class TerceiroCreate(BaseModel):
     pessoa: str
-    origem: str    # pix | cartao
+    direcao: str = "a_receber"  # a_receber | a_pagar
+    origem: str = "pix"         # pix | cartao
     descricao: str
     mes_alvo: str  # YYYY-MM
     dia: int
@@ -374,6 +381,8 @@ class TerceiroCreate(BaseModel):
 
 class TerceiroUpdate(BaseModel):
     recebido: Optional[bool] = None
+    pago: Optional[bool] = None
+    direcao: Optional[str] = None
     valor: Optional[float] = None
     descricao: Optional[str] = None
     pessoa: Optional[str] = None
@@ -483,21 +492,35 @@ def get_despesas_atrasadas(_: str = Depends(verify_token)):
                 "dia": dia,
             })
 
-    # Terceiros a receber: recebido=False e (mes_alvo < cur) ou (mes_alvo == cur e dia < hoje)
-    terceiros = db.table("terceiros").select("*").eq("recebido", False).execute().data
+    # Terceiros — separar por direção
+    terceiros = db.table("terceiros").select("*").execute().data
     for t in terceiros:
+        direcao = t.get("direcao", "a_receber")
         mes = t.get("mes_alvo", "")
         dia = t.get("dia", 0)
-        if mes < cur_mes or (mes == cur_mes and dia < cur_day):
+        is_overdue = mes < cur_mes or (mes == cur_mes and dia < cur_day)
+        if not is_overdue:
+            continue
+        if direcao == "a_receber" and not t.get("recebido", False):
             items.append({
                 "tipo": "terceiro",
                 "id": t["id"],
                 "descricao": t.get("descricao", ""),
-                "categoria": f"A Receber ({t.get('pessoa', '')})",
+                "categoria": f"A Receber — {t.get('pessoa', '')}",
                 "valor": float(t.get("valor", 0)),
                 "mes": mes,
                 "dia": dia,
                 "receita": True,
+            })
+        elif direcao == "a_pagar" and not t.get("pago", False):
+            items.append({
+                "tipo": "terceiro_pagar",
+                "id": t["id"],
+                "descricao": t.get("descricao", ""),
+                "categoria": f"A Pagar — {t.get('pessoa', '')}",
+                "valor": float(t.get("valor", 0)),
+                "mes": mes,
+                "dia": dia,
             })
 
     items.sort(key=lambda x: (x["mes"], x["dia"]))
