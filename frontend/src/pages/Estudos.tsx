@@ -90,46 +90,57 @@ export default function Estudos() {
   const invFrentes = () => qc.invalidateQueries({ queryKey: ["estudos-frentes"] });
   const invItens  = () => qc.invalidateQueries({ queryKey: ["estudos-itens"] });
 
+  const onErr = (e: Error) => alert(`Erro: ${e.message}`);
+
   const createCat = useMutation({
     mutationFn: (d: object) => apiFetch("/api/v1/estudos/categorias", { method: "POST", body: JSON.stringify(d) }),
     onSuccess: () => { invCats(); setCatOpen(false); },
+    onError: onErr,
   });
   const updateCat = useMutation({
     mutationFn: ({ id, d }: { id: string; d: object }) =>
       apiFetch(`/api/v1/estudos/categorias/${id}`, { method: "PATCH", body: JSON.stringify(d) }),
     onSuccess: () => { invCats(); setCatOpen(false); setEditingCat(null); },
+    onError: onErr,
   });
   const deleteCat = useMutation({
     mutationFn: (id: string) => apiFetch(`/api/v1/estudos/categorias/${id}`, { method: "DELETE" }),
     onSuccess: invCats,
+    onError: onErr,
   });
 
   const createFrente = useMutation({
     mutationFn: (d: object) => apiFetch("/api/v1/estudos/frentes", { method: "POST", body: JSON.stringify(d) }),
     onSuccess: () => { invFrentes(); setFrenteOpen(false); },
+    onError: onErr,
   });
   const updateFrente = useMutation({
     mutationFn: ({ id, d }: { id: string; d: object }) =>
       apiFetch(`/api/v1/estudos/frentes/${id}`, { method: "PATCH", body: JSON.stringify(d) }),
     onSuccess: () => { invFrentes(); setFrenteOpen(false); setEditingFrente(null); },
+    onError: onErr,
   });
   const deleteFrente = useMutation({
     mutationFn: (id: string) => apiFetch(`/api/v1/estudos/frentes/${id}`, { method: "DELETE" }),
     onSuccess: invFrentes,
+    onError: onErr,
   });
 
   const createItem = useMutation({
     mutationFn: (d: object) => apiFetch("/api/v1/estudos/itens", { method: "POST", body: JSON.stringify(d) }),
     onSuccess: () => { invItens(); setItemOpen(false); },
+    onError: onErr,
   });
   const updateItem = useMutation({
     mutationFn: ({ id, d }: { id: string; d: object }) =>
       apiFetch(`/api/v1/estudos/itens/${id}`, { method: "PATCH", body: JSON.stringify(d) }),
     onSuccess: () => { invItens(); setItemOpen(false); setEditingItem(null); },
+    onError: onErr,
   });
   const deleteItem = useMutation({
     mutationFn: (id: string) => apiFetch(`/api/v1/estudos/itens/${id}`, { method: "DELETE" }),
     onSuccess: invItens,
+    onError: onErr,
   });
   const reorderItems = useMutation({
     mutationFn: (ids: string[]) =>
