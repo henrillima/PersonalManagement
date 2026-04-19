@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import TarefasRecorrentesView from "@/pages/TarefasRecorrentesView";
+import { EmojiPicker } from "@/components/ui/emoji-picker";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -686,13 +687,14 @@ export default function Tarefas() {
         <DialogContent className="max-w-sm">
           <DialogHeader><DialogTitle>Nova Categoria</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
-            <div className="grid grid-cols-3 gap-3">
-              <div className="col-span-1">
+            <div className="flex gap-3 items-end">
+              <div>
                 <Label>Emoji</Label>
-                <Input value={catEmoji} onChange={e => setCatEmoji(e.target.value)}
-                  maxLength={2} className="mt-1 text-center text-lg" />
+                <div className="mt-1">
+                  <EmojiPicker value={catEmoji} onChange={setCatEmoji} />
+                </div>
               </div>
-              <div className="col-span-2">
+              <div className="flex-1">
                 <Label>Nome</Label>
                 <Input value={catNome} onChange={e => setCatNome(e.target.value)}
                   placeholder="Ex: MadCap, Empresa X..." className="mt-1" />
@@ -789,7 +791,7 @@ function GerenciarCategorias({ categorias, onUpdate, onDelete, onNew }: {
           <div key={cat.id} className="flex items-center gap-2 group py-1">
             {editId === cat.id ? (
               <>
-                <Input value={editEmoji} onChange={e => setEditEmoji(e.target.value)} className="w-12 h-7 text-center" maxLength={2} />
+                <EmojiPicker value={editEmoji} onChange={setEditEmoji} size="sm" />
                 <input type="color" value={editCor} onChange={e => setEditCor(e.target.value)}
                   className="w-6 h-6 rounded cursor-pointer border shrink-0" />
                 <Input value={editNome} onChange={e => setEditNome(e.target.value)} className="h-7 text-xs flex-1"

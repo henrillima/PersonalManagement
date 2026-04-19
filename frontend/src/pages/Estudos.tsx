@@ -24,6 +24,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { EmojiPicker } from "@/components/ui/emoji-picker";
 
 const TIPOS = ["Livro", "Curso", "Vídeo", "Artigo", "Podcast", "Outro"];
 const TIPO_ICON: Record<string, string> = {
@@ -194,7 +195,7 @@ export default function Estudos() {
   function toggleCat(id: string) {
     setExpandedCats(prev => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
   }
@@ -368,13 +369,14 @@ export default function Estudos() {
         <DialogContent className="max-w-sm">
           <DialogHeader><DialogTitle>{editingCat ? "Editar Categoria" : "Nova Categoria"}</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
-            <div className="grid grid-cols-3 gap-3">
+            <div className="flex gap-3 items-end">
               <div>
                 <Label>Emoji</Label>
-                <Input value={catForm.emoji} onChange={e => setCatForm(f => ({ ...f, emoji: e.target.value }))}
-                  maxLength={2} className="mt-1 text-center text-lg" />
+                <div className="mt-1">
+                  <EmojiPicker value={catForm.emoji} onChange={v => setCatForm(f => ({ ...f, emoji: v }))} />
+                </div>
               </div>
-              <div className="col-span-2">
+              <div className="flex-1">
                 <Label>Nome</Label>
                 <Input value={catForm.nome} onChange={e => setCatForm(f => ({ ...f, nome: e.target.value }))}
                   placeholder="Ex: Programação, Negócios…" className="mt-1" />
