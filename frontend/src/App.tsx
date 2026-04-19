@@ -16,6 +16,7 @@ import Pendencias from "@/pages/Financeiro/Pendencias";
 import Saude from "@/pages/Saude";
 import ListaCompras from "@/pages/ListaCompras";
 import Rotina from "@/pages/Rotina";
+import Estudos from "@/pages/Estudos";
 
 function AuthGuard() {
   const token = localStorage.getItem("token");
@@ -48,6 +49,7 @@ export default function App() {
             <Route path="rotina" element={<Rotina />} />
             <Route path="saude" element={<Saude />} />
             <Route path="lista-compras" element={<ListaCompras />} />
+            <Route path="estudos" element={<Estudos />} />
           </Route>
         </Route>
       </Routes>

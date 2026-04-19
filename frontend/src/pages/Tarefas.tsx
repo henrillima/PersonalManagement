@@ -14,7 +14,7 @@ import {
   Settings, ChevronDown, ChevronRight, Pencil, Check, X,
 } from "lucide-react";
 import { apiFetch, fmtDate } from "@/lib/api";
-import type { Tarefa, Frente, TarefaStatus, Prioridade, CategoriaItem } from "@/types";
+import type { Tarefa, Frente, TarefaStatus, Prioridade, CategoriaItem, TarefaRecorrenteOcorrencia } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -32,6 +32,7 @@ import TarefasRecorrentesView from "@/pages/TarefasRecorrentesView";
 // ── Constants ──────────────────────────────────────────────────────────────────
 
 const TODAY = new Date().toISOString().slice(0, 10);
+const MES_ATUAL = new Date().toISOString().slice(0, 7);
 
 const COLUMNS: { id: TarefaStatus; label: string; bg: string }[] = [
   { id: "todo",        label: "A Fazer",      bg: "bg-slate-50 dark:bg-slate-800/50" },
@@ -127,6 +128,12 @@ export default function Tarefas() {
     enabled: catTab === "arquivo",
   });
 
+  const { data: ocorrencias = [] } = useQuery<TarefaRecorrenteOcorrencia[]>({
+    queryKey: ["ocorrencias-mes", MES_ATUAL],
+    queryFn: () => apiFetch(`/api/v1/tarefas-recorrentes/ocorrencias?mes=${MES_ATUAL}`),
+    enabled: catTab !== "arquivo" && catTab !== "recorrentes",
+  });
+
   // Set default tab when categories load
   useEffect(() => {
     if (categorias.length > 0 && !catTab) {
@@ -175,6 +182,12 @@ export default function Tarefas() {
     mutationFn: (ids: string[]) =>
       apiFetch("/api/v1/tarefas/reorder", { method: "POST", body: JSON.stringify({ ids }) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["tarefas"] }),
+  });
+
+  const toggleOcorrencia = useMutation({
+    mutationFn: ({ id, concluida }: { id: string; concluida: boolean }) =>
+      apiFetch(`/api/v1/tarefas-recorrentes/ocorrencias/${id}`, { method: "PATCH", body: JSON.stringify({ concluida }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["ocorrencias-mes", MES_ATUAL] }),
   });
 
   const createProjeto = useMutation({
@@ -227,6 +240,14 @@ export default function Tarefas() {
     if (priorFilter  !== "all" && t.prioridade !== priorFilter) return false;
     return true;
   }), [catTasks, frenteFilter, priorFilter]);
+
+  const visibleOcorrencias = useMemo(() => {
+    if (catTab === "arquivo" || catTab === "recorrentes") return [];
+    return ocorrencias.filter(oc =>
+      (catTab === "todas" || oc.categoria === catTab) &&
+      (priorFilter === "all" || oc.prioridade === priorFilter)
+    );
+  }, [ocorrencias, catTab, priorFilter]);
 
   const getColAll = (s: TarefaStatus) =>
     catTasks.filter(t => t.status === s).sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0));
@@ -489,6 +510,16 @@ export default function Tarefas() {
                           />
                         ))}
                       </SortableContext>
+                      {(col.id === "todo" || col.id === "done") && visibleOcorrencias
+                        .filter(oc => col.id === "todo" ? !oc.concluida : oc.concluida)
+                        .map(oc => (
+                          <RecorrenteCard
+                            key={`rec-${oc.id}`}
+                            oc={oc}
+                            showCategoria={catTab === "todas"}
+                            onToggle={() => toggleOcorrencia.mutate({ id: oc.id, concluida: !oc.concluida })}
+                          />
+                        ))}
                       {items.length === 0 && activeTask && (
                         <div className="flex items-center justify-center h-14 rounded-lg border-2 border-dashed border-[#C8DA2D]/30 text-xs text-muted-foreground">
                           Soltar aqui
@@ -973,6 +1004,60 @@ function SortableCard({ tarefa, isDragging, ...rest }: SortableCardProps) {
       className={cn(isDragging && "opacity-30")}
     >
       <CardContent tarefa={tarefa} dragListeners={listeners as Record<string, unknown>} {...rest} />
+    </div>
+  );
+}
+
+// ── RecorrenteCard ─────────────────────────────────────────────────────────────
+
+function RecorrenteCard({ oc, showCategoria, onToggle }: {
+  oc: TarefaRecorrenteOcorrencia;
+  showCategoria?: boolean;
+  onToggle: () => void;
+}) {
+  const prioridade = PRIORIDADES.find(p => p.value === oc.prioridade);
+  return (
+    <div className={cn(
+      "bg-card border border-dashed rounded-xl p-3 transition-all",
+      oc.concluida ? "border-border opacity-50" : "border-indigo-400/30 hover:border-indigo-400/50",
+    )}>
+      <div className="flex items-start gap-1.5">
+        <div className="w-3 shrink-0" />
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap gap-1 mb-1.5">
+            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-indigo-400/10 text-indigo-400">🔁</span>
+            {showCategoria && oc.categoria && (
+              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                {oc.categoria}
+              </span>
+            )}
+            {prioridade && (
+              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                style={{ backgroundColor: prioridade.cor + "25", color: prioridade.cor }}>
+                {prioridade.label}
+              </span>
+            )}
+            {oc.frente_nome && (
+              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                style={{ backgroundColor: (oc.frente_cor ?? "#94a3b8") + "25", color: oc.frente_cor ?? "#94a3b8" }}>
+                {oc.frente_nome}
+              </span>
+            )}
+          </div>
+          <p className={cn("text-sm font-medium leading-snug", oc.concluida && "line-through text-muted-foreground")}>
+            {oc.titulo}
+          </p>
+          <p className="text-[10px] text-muted-foreground mt-1">
+            📅 {new Date(oc.data_alvo + "T00:00:00").toLocaleDateString("pt-BR")}
+          </p>
+        </div>
+        <button onClick={onToggle}
+          className={cn("shrink-0 p-1 rounded transition-colors",
+            oc.concluida ? "text-green-400 hover:text-muted-foreground" : "text-muted-foreground hover:text-green-400"
+          )}>
+          <Check size={13} />
+        </button>
+      </div>
     </div>
   );
 }

@@ -263,6 +263,7 @@ export interface TarefaResumo {
   data_limite: string | null;
   frente_nome: string | null;
   frente_cor: string | null;
+  fonte?: "tarefa" | "recorrente";
 }
 
 export interface DespesaResumo {
@@ -270,7 +271,7 @@ export interface DespesaResumo {
   categoria: string;
   valor: number;
   data: string;
-  tipo: "recorrente" | "pontual";
+  tipo: "recorrente" | "pontual" | "fatura" | "divida" | "terceiro";
 }
 
 export interface HomeResumo {
@@ -313,6 +314,38 @@ export interface TarefaRecorrenteOcorrencia {
   frente_nome: string | null;
   frente_cor: string | null;
   frequencia: string;
+  criado_em: string;
+}
+
+// ── Estudos ───────────────────────────────────────────────────────────────────
+
+export interface CatEstudo {
+  id: string;
+  nome: string;
+  emoji: string;
+  ordem: number;
+  criado_em: string;
+}
+
+export interface FrenteEstudo {
+  id: string;
+  categoria_id: string;
+  nome: string;
+  ordem: number;
+  criado_em: string;
+}
+
+export interface ItemEstudo {
+  id: string;
+  frente_id: string;
+  titulo: string;
+  tipo: string;
+  obrigatorio: boolean;
+  progresso: number;
+  concluido: boolean;
+  url: string | null;
+  notas: string | null;
+  ordem: number;
   criado_em: string;
 }
 

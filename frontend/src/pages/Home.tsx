@@ -150,7 +150,7 @@ export default function Home() {
               Próximas despesas (30 dias)
             </h2>
             <button
-              onClick={() => navigate("/financeiro/pontuais")}
+              onClick={() => navigate("/financeiro/dashboard")}
               className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
             >
               Ver todas <ArrowRight size={12} />
@@ -264,7 +264,10 @@ function TarefaItem({ tarefa }: { tarefa: TarefaResumo }) {
       </span>
       <div className="flex-1 min-w-0">
         <p className="text-sm leading-snug truncate">{tarefa.titulo}</p>
-        <div className="flex items-center gap-2 mt-0.5">
+        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+          {tarefa.fonte === "recorrente" && (
+            <span className="text-[10px] px-1 py-0.5 rounded bg-indigo-400/10 text-indigo-400">🔁</span>
+          )}
           {tarefa.frente_nome && (
             <span
               className="text-[10px] px-1.5 py-0.5 rounded font-medium"
@@ -288,22 +291,24 @@ function TarefaItem({ tarefa }: { tarefa: TarefaResumo }) {
   );
 }
 
+const TIPO_BADGE: Record<string, { label: string; cls: string }> = {
+  recorrente: { label: "Recorrente", cls: "bg-blue-400/10 text-blue-400" },
+  pontual:    { label: "Pontual",    cls: "bg-amber-400/10 text-amber-400" },
+  fatura:     { label: "Fatura",     cls: "bg-purple-400/10 text-purple-400" },
+  divida:     { label: "Dívida",     cls: "bg-red-400/10 text-red-400" },
+  terceiro:   { label: "A Pagar",    cls: "bg-orange-400/10 text-orange-400" },
+};
+
 function DespesaItem({ despesa }: { despesa: DespesaResumo }) {
+  const badge = TIPO_BADGE[despesa.tipo] ?? { label: despesa.tipo, cls: "bg-muted text-muted-foreground" };
   return (
     <div className="flex items-center justify-between py-1.5 gap-4">
       <div className="flex-1 min-w-0">
         <p className="text-sm truncate">{despesa.descricao}</p>
-        <div className="flex items-center gap-2 mt-0.5">
+        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
           <span className="text-[10px] text-muted-foreground">{despesa.categoria}</span>
           <span className="text-[10px] text-muted-foreground">{fmtDate(despesa.data)}</span>
-          <span className={cn(
-            "text-[10px] px-1.5 py-0.5 rounded",
-            despesa.tipo === "recorrente"
-              ? "bg-blue-400/10 text-blue-400"
-              : "bg-amber-400/10 text-amber-400"
-          )}>
-            {despesa.tipo === "recorrente" ? "Recorrente" : "Pontual"}
-          </span>
+          <span className={cn("text-[10px] px-1.5 py-0.5 rounded", badge.cls)}>{badge.label}</span>
         </div>
       </div>
       <span className="text-sm font-medium tabular-nums shrink-0 text-red-400">
