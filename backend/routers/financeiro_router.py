@@ -786,18 +786,20 @@ def get_financeiro_dashboard(dist_mes: Optional[str] = None, _: str = Depends(ve
     except Exception:
         pass
 
-    try:
-        gastos_var = (
-            db.table("gastos_variaveis")
-            .select("categoria, valor")
-            .eq("mes", dist_mes_final)
-            .execute()
-            .data
-        )
-        for g in gastos_var:
-            cat_map[g.get("categoria") or "Outros"] += float(g["valor"])
-    except Exception:
-        pass
+    # Custo de vida — orçamento por categoria para o mês selecionado
+    def custo_vida_cats_para_mes(mes_str: str) -> dict:
+        cats: dict[str, float] = {}
+        for cat, base_teto in base_orcamento.items():
+            teto = exc_orcamento.get((cat, mes_str), base_teto)
+            if teto > 0:
+                cats[cat] = teto
+        for (cat, mes_exc), teto in exc_orcamento.items():
+            if mes_exc == mes_str and cat not in base_orcamento and teto > 0:
+                cats[cat] = teto
+        return cats
+
+    for cat, valor in custo_vida_cats_para_mes(dist_mes_final).items():
+        cat_map[cat] += valor
 
     distribuicao = sorted(
         [{"categoria": k, "valor": round(v, 2)} for k, v in cat_map.items()],
