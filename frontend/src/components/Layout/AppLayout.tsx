@@ -87,7 +87,7 @@ export default function AppLayout() {
         {/* Page content */}
         <main className="flex-1 overflow-y-auto">
           {status === "up" ? (
-            <div className="p-6 max-w-7xl mx-auto">
+            <div className="p-3 sm:p-6 max-w-7xl mx-auto">
               <Outlet />
             </div>
           ) : (

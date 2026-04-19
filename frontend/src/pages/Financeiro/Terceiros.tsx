@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Trash2, Check } from "lucide-react";
-import { apiFetch, fmtBRL, fmtDate } from "@/lib/api";
+import { Plus, Trash2, Check, Pencil } from "lucide-react";
+import { apiFetch, fmtBRL } from "@/lib/api";
 import type { Terceiro } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,8 +20,9 @@ const empty = (): Form => ({
 
 export default function Terceiros() {
   const qc = useQueryClient();
-  const [open, setOpen]   = useState(false);
-  const [form, setForm]   = useState<Form>(empty());
+  const [open, setOpen]       = useState(false);
+  const [form, setForm]       = useState<Form>(empty());
+  const [editing, setEditing] = useState<Terceiro | null>(null);
 
   const { data: rows = [], isLoading } = useQuery<Terceiro[]>({
     queryKey: ["terceiros"],
@@ -38,13 +39,26 @@ export default function Terceiros() {
   const update = useMutation({
     mutationFn: ({ id, d }: { id: string; d: object }) =>
       apiFetch(`/api/v1/terceiros/${id}`, { method: "PATCH", body: JSON.stringify(d) }),
-    onSuccess: invalidate,
+    onSuccess: () => { invalidate(); setOpen(false); setEditing(null); },
   });
 
   const del = useMutation({
     mutationFn: (id: string) => apiFetch(`/api/v1/terceiros/${id}`, { method: "DELETE" }),
     onSuccess: invalidate,
   });
+
+  function openCreate() { setEditing(null); setForm(empty()); setOpen(true); }
+  function openEdit(r: Terceiro) {
+    setEditing(r);
+    setForm({ pessoa: r.pessoa, origem: r.origem as "pix" | "cartao", descricao: r.descricao, mes_alvo: r.mes_alvo, dia: String(r.dia), valor: String(r.valor) });
+    setOpen(true);
+  }
+
+  function handleSubmit() {
+    const payload = { ...form, dia: parseInt(form.dia), valor: parseFloat(form.valor) };
+    if (editing) update.mutate({ id: editing.id, d: payload });
+    else create.mutate(payload);
+  }
 
   const pendentes = rows.filter((r) => !r.recebido);
   const recebidos = rows.filter((r) => r.recebido);
@@ -55,41 +69,46 @@ export default function Terceiros() {
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm text-muted-foreground">
-            {pendentes.length} pendente{pendentes.length !== 1 ? "s" : ""} · total {fmtBRL(totalPendente)}
-          </p>
-        </div>
-        <Button size="sm" onClick={() => { setForm(empty()); setOpen(true); }} className="bg-[#C8DA2D] text-[#0C1923] hover:bg-[#d4e640]">
+        <p className="text-sm text-muted-foreground">
+          {pendentes.length} pendente{pendentes.length !== 1 ? "s" : ""} · total {fmtBRL(totalPendente)}
+        </p>
+        <Button size="sm" onClick={openCreate} className="bg-[#C8DA2D] text-[#0C1923] hover:bg-[#d4e640]">
           <Plus size={14} className="mr-1" /> Registrar
         </Button>
       </div>
 
-      {/* Pending */}
       <div>
         <h3 className="text-sm font-semibold text-amber-400 mb-2">A Receber ({pendentes.length})</h3>
         {pendentes.length === 0 ? (
           <p className="text-sm text-muted-foreground py-2">Nenhum valor pendente.</p>
         ) : (
           <div className="space-y-1">
-            {pendentes.map((r) => <TerceiroRow key={r.id} item={r} onMark={() => update.mutate({ id: r.id, d: { recebido: true } })} onDelete={() => del.mutate(r.id)} />)}
+            {pendentes.map((r) => (
+              <TerceiroRow key={r.id} item={r}
+                onMark={() => update.mutate({ id: r.id, d: { recebido: true } })}
+                onEdit={() => openEdit(r)}
+                onDelete={() => del.mutate(r.id)} />
+            ))}
           </div>
         )}
       </div>
 
-      {/* Received */}
       {recebidos.length > 0 && (
         <div>
           <h3 className="text-sm font-semibold text-green-400 mb-2">Recebidos ({recebidos.length})</h3>
           <div className="space-y-1">
-            {recebidos.map((r) => <TerceiroRow key={r.id} item={r} received onDelete={() => del.mutate(r.id)} />)}
+            {recebidos.map((r) => (
+              <TerceiroRow key={r.id} item={r} received
+                onEdit={() => openEdit(r)}
+                onDelete={() => del.mutate(r.id)} />
+            ))}
           </div>
         </div>
       )}
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) setEditing(null); }}>
         <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Registrar Terceiro</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{editing ? "Editar Terceiro" : "Registrar Terceiro"}</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -127,9 +146,9 @@ export default function Terceiros() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
-            <Button onClick={() => create.mutate({ ...form, dia: parseInt(form.dia), valor: parseFloat(form.valor) })} disabled={!form.pessoa || !form.valor || create.isPending} className="bg-[#C8DA2D] text-[#0C1923] hover:bg-[#d4e640]">
-              Registrar
+            <Button variant="outline" onClick={() => { setOpen(false); setEditing(null); }}>Cancelar</Button>
+            <Button onClick={handleSubmit} disabled={!form.pessoa || !form.valor || create.isPending || update.isPending} className="bg-[#C8DA2D] text-[#0C1923] hover:bg-[#d4e640]">
+              {editing ? "Salvar" : "Registrar"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -138,8 +157,8 @@ export default function Terceiros() {
   );
 }
 
-function TerceiroRow({ item, received, onMark, onDelete }: {
-  item: Terceiro; received?: boolean; onMark?: () => void; onDelete: () => void;
+function TerceiroRow({ item, received, onMark, onEdit, onDelete }: {
+  item: Terceiro; received?: boolean; onMark?: () => void; onEdit: () => void; onDelete: () => void;
 }) {
   return (
     <div className={cn("flex items-center gap-3 bg-card border rounded-lg px-4 py-3", received ? "border-border opacity-60" : "border-border")}>
@@ -155,6 +174,7 @@ function TerceiroRow({ item, received, onMark, onDelete }: {
           <Check size={15} />
         </button>
       )}
+      <button onClick={onEdit} className="text-muted-foreground hover:text-blue-400 transition-colors"><Pencil size={13} /></button>
       <button onClick={onDelete} className="text-muted-foreground hover:text-red-500 transition-colors"><Trash2 size={13} /></button>
     </div>
   );

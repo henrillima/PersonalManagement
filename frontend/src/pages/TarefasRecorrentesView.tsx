@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, Trash2, Pencil, ChevronLeft, ChevronRight, Check, Settings } from "lucide-react";
 import { apiFetch, currentMes, mesLabel } from "@/lib/api";
@@ -45,7 +45,12 @@ const emptyForm = (): RecForm => ({
   prioridade: "media", frequencia: "diaria", dias_semana: [], dia_mes: "", mes: "",
 });
 
-export default function TarefasRecorrentesView() {
+interface Props {
+  openCreateTrigger?: boolean;
+  onTriggerHandled?: () => void;
+}
+
+export default function TarefasRecorrentesView({ openCreateTrigger, onTriggerHandled }: Props) {
   const qc = useQueryClient();
   const [mes, setMes] = useState(currentMes());
   const [manageOpen, setManageOpen] = useState(false);
@@ -122,6 +127,22 @@ export default function TarefasRecorrentesView() {
   });
 
   function openCreate() { setEditing(null); setForm(emptyForm()); setFormOpen(true); }
+
+  useEffect(() => {
+    if (openCreateTrigger) { openCreate(); onTriggerHandled?.(); }
+  }, [openCreateTrigger]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const frentesFiltered = useMemo(
+    () => form.categoria ? frentes.filter((fr) => fr.categoria === form.categoria) : frentes,
+    [frentes, form.categoria]
+  );
+
+  function handleCategoriaChange(v: string) {
+    setForm((f) => {
+      const stillValid = frentes.some((fr) => fr.id === f.frente_id && fr.categoria === v);
+      return { ...f, categoria: v, frente_id: stillValid ? f.frente_id : "" };
+    });
+  }
 
   function openEdit(t: TarefaRecorrente) {
     setEditing(t);
@@ -356,6 +377,18 @@ export default function TarefasRecorrentesView() {
               />
             </div>
 
+            <div>
+              <Label>Categoria</Label>
+              <Select value={form.categoria} onValueChange={handleCategoriaChange}>
+                <SelectTrigger className="mt-1"><SelectValue placeholder="Selecione" /></SelectTrigger>
+                <SelectContent>
+                  {categorias.map((c) => (
+                    <SelectItem key={c.id} value={c.nome}>{c.emoji} {c.nome}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label>Projeto (opcional)</Label>
@@ -366,9 +399,12 @@ export default function TarefasRecorrentesView() {
                   <SelectTrigger className="mt-1"><SelectValue placeholder="Nenhum" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__none__">Nenhum</SelectItem>
-                    {frentes.map((fr) => <SelectItem key={fr.id} value={fr.id}>{fr.nome}</SelectItem>)}
+                    {frentesFiltered.map((fr) => <SelectItem key={fr.id} value={fr.id}>{fr.nome}</SelectItem>)}
                   </SelectContent>
                 </Select>
+                {form.categoria && frentesFiltered.length === 0 && (
+                  <p className="text-[10px] text-muted-foreground mt-1">Nenhum projeto em "{form.categoria}"</p>
+                )}
               </div>
               <div>
                 <Label>Prioridade</Label>
@@ -381,18 +417,6 @@ export default function TarefasRecorrentesView() {
                   </SelectContent>
                 </Select>
               </div>
-            </div>
-
-            <div>
-              <Label>Categoria</Label>
-              <Select value={form.categoria} onValueChange={(v) => setForm((f) => ({ ...f, categoria: v }))}>
-                <SelectTrigger className="mt-1"><SelectValue placeholder="Selecione" /></SelectTrigger>
-                <SelectContent>
-                  {categorias.map((c) => (
-                    <SelectItem key={c.id} value={c.nome}>{c.emoji} {c.nome}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </div>
 
             <div>

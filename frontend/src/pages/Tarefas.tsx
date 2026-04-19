@@ -101,6 +101,7 @@ export default function Tarefas() {
   const [localTasks, setLocalTasks]     = useState<Tarefa[]>([]);
   const [activeTask, setActiveTask]     = useState<Tarefa | null>(null);
   const [manageOpen, setManageOpen]     = useState(false);
+  const [recOpenCreate, setRecOpenCreate] = useState(false);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
@@ -341,9 +342,12 @@ export default function Tarefas() {
             )}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <Button variant="outline" size="sm" onClick={() => openNovoProjeto()}>
             <Plus size={14} className="mr-1" /> Novo Projeto
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => { setCatTab("recorrentes"); setRecOpenCreate(true); }}>
+            🔁 Recorrente
           </Button>
           <Button size="sm" onClick={openCreate} className="bg-[#C8DA2D] text-[#0C1923] hover:bg-[#d4e640]">
             <Plus size={14} className="mr-1" /> Nova Tarefa
@@ -409,7 +413,10 @@ export default function Tarefas() {
       )}
 
       {catTab === "recorrentes" ? (
-        <TarefasRecorrentesView />
+        <TarefasRecorrentesView
+          openCreateTrigger={recOpenCreate}
+          onTriggerHandled={() => setRecOpenCreate(false)}
+        />
       ) : catTab === "arquivo" ? (
         <ArquivoView
           arquivadas={arquivadas}

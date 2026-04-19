@@ -21,14 +21,14 @@ export default function FinanceiroLayout() {
       </div>
 
       {/* Sub-navigation tabs */}
-      <div className="flex gap-1 flex-wrap border-b border-border pb-0">
+      <div className="flex gap-1 overflow-x-auto border-b border-border pb-0 scrollbar-hide">
         {tabs.map(({ to, label }) => (
           <NavLink
             key={to}
             to={to}
             className={({ isActive }) =>
               cn(
-                "px-3 py-2 text-sm font-medium rounded-t-md border-b-2 transition-colors -mb-px",
+                "px-3 py-2 text-sm font-medium rounded-t-md border-b-2 transition-colors -mb-px whitespace-nowrap shrink-0",
                 isActive
                   ? "border-[#C8DA2D] text-[#C8DA2D]"
                   : "border-transparent text-muted-foreground hover:text-foreground"

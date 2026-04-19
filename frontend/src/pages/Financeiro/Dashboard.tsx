@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch, fmtBRL, currentMes, mesLabel } from "@/lib/api";
-import { TrendingUp, TrendingDown, Wallet, Calendar, Info, ChevronLeft, ChevronRight } from "lucide-react";
+import { TrendingUp, TrendingDown, Wallet, Calendar, Info, ChevronLeft, ChevronRight, AlertTriangle } from "lucide-react";
 import {
   ComposedChart,
   Bar,
@@ -47,6 +47,17 @@ interface DashData {
   distribuicao_despesas: DistItem[];
   dist_mes: string;
   cur_mes: string;
+}
+
+interface AtrasadaItem {
+  tipo: "pontual" | "divida" | "terceiro";
+  id: string;
+  descricao: string;
+  categoria: string;
+  valor: number;
+  mes: string;
+  dia: number;
+  receita?: boolean;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -109,7 +120,7 @@ function KpiCard({ icon, label, value, sub, valueColor }: KpiCardProps) {
         {icon}
         <span className="text-xs font-medium uppercase tracking-wider">{label}</span>
       </div>
-      <span className={`text-2xl font-bold ${valueColor ?? "text-foreground"}`}>{value}</span>
+      <span className={`text-lg sm:text-2xl font-bold truncate ${valueColor ?? "text-foreground"}`}>{value}</span>
       {sub && <span className="text-muted-foreground text-xs">{sub}</span>}
     </div>
   );
@@ -162,6 +173,59 @@ function ProjectionTooltip({ active, payload, label }: any) {
             {fmtBRL(saldo.value)}
           </span>
         </div>
+      )}
+    </div>
+  );
+}
+
+// ── Painel de Despesas Atrasadas ──────────────────────────────────────────────
+
+const TIPO_LABEL: Record<string, string> = { pontual: "Pontual", divida: "Dívida", terceiro: "A Receber" };
+
+function PainelAtrasadas() {
+  const { data: items = [], isLoading } = useQuery<AtrasadaItem[]>({
+    queryKey: ["despesas-atrasadas"],
+    queryFn: () => apiFetch("/api/v1/despesas-atrasadas"),
+  });
+
+  if (isLoading || items.length === 0) return null;
+
+  const despesas = items.filter((i) => !i.receita);
+  const receitas = items.filter((i) => i.receita);
+  const totalAtrasado = despesas.reduce((s, i) => s + i.valor, 0);
+
+  return (
+    <div className="bg-card border border-red-500/30 rounded-xl p-5">
+      <div className="flex items-center gap-2 mb-4">
+        <AlertTriangle size={15} className="text-red-400 shrink-0" />
+        <h2 className="text-sm font-semibold text-red-400 uppercase tracking-wider">
+          Atenção — Itens em Atraso ({items.length})
+        </h2>
+        {despesas.length > 0 && (
+          <span className="ml-auto text-xs text-red-400 font-semibold">{fmtBRL(totalAtrasado)} em aberto</span>
+        )}
+      </div>
+      <div className="space-y-1.5">
+        {items.map((item) => (
+          <div key={`${item.tipo}-${item.id}`}
+            className={`flex items-center gap-3 rounded-lg px-3 py-2 ${item.receita ? "bg-amber-500/5 border border-amber-500/20" : "bg-red-500/5 border border-red-500/20"}`}>
+            <div className="flex-1 min-w-0">
+              <span className="text-sm font-medium truncate block">{item.descricao}</span>
+              <span className="text-xs text-muted-foreground">{item.categoria} · {item.mes}/{String(item.dia).padStart(2, "0")}</span>
+            </div>
+            <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${item.receita ? "bg-amber-500/15 text-amber-400" : "bg-red-500/15 text-red-400"}`}>
+              {item.receita ? "a receber" : TIPO_LABEL[item.tipo]}
+            </span>
+            <span className={`font-semibold tabular-nums text-sm shrink-0 ${item.receita ? "text-amber-400" : "text-red-400"}`}>
+              {fmtBRL(item.valor)}
+            </span>
+          </div>
+        ))}
+      </div>
+      {receitas.length > 0 && despesas.length > 0 && (
+        <p className="text-xs text-muted-foreground mt-3">
+          Itens em amarelo são receitas ainda não recebidas.
+        </p>
       )}
     </div>
   );
@@ -238,6 +302,9 @@ export default function FinanceiroDashboard() {
           sub={`${deltaFinal >= 0 ? "+" : ""}${fmtBRL(deltaFinal)} vs hoje`}
         />
       </div>
+
+      {/* Overdue panel */}
+      <PainelAtrasadas />
 
       {/* Model explanation */}
       <div className="flex items-start gap-2 bg-muted/40 border border-border rounded-xl px-4 py-3 text-xs text-muted-foreground">

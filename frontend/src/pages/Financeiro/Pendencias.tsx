@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Trash2, Check } from "lucide-react";
+import { Plus, Trash2, Check, Pencil } from "lucide-react";
 import { apiFetch, fmtBRL } from "@/lib/api";
 import type { Divida } from "@/types";
 import { Button } from "@/components/ui/button";
@@ -19,8 +19,9 @@ const empty = (): Form => ({
 
 export default function Pendencias() {
   const qc = useQueryClient();
-  const [open, setOpen] = useState(false);
-  const [form, setForm] = useState<Form>(empty());
+  const [open, setOpen]       = useState(false);
+  const [form, setForm]       = useState<Form>(empty());
+  const [editing, setEditing] = useState<Divida | null>(null);
 
   const { data: rows = [], isLoading } = useQuery<Divida[]>({
     queryKey: ["dividas"],
@@ -37,7 +38,7 @@ export default function Pendencias() {
   const update = useMutation({
     mutationFn: ({ id, d }: { id: string; d: object }) =>
       apiFetch(`/api/v1/dividas/${id}`, { method: "PATCH", body: JSON.stringify(d) }),
-    onSuccess: invalidate,
+    onSuccess: () => { invalidate(); setOpen(false); setEditing(null); },
   });
 
   const del = useMutation({
@@ -45,11 +46,23 @@ export default function Pendencias() {
     onSuccess: invalidate,
   });
 
+  function openCreate() { setEditing(null); setForm(empty()); setOpen(true); }
+  function openEdit(r: Divida) {
+    setEditing(r);
+    setForm({ descricao: r.descricao, valor: String(r.valor), mes: r.mes, dia: String(r.dia) });
+    setOpen(true);
+  }
+
+  function handleSubmit() {
+    const payload = { ...form, dia: parseInt(form.dia), valor: parseFloat(form.valor) };
+    if (editing) update.mutate({ id: editing.id, d: payload });
+    else create.mutate(payload);
+  }
+
   const today = new Date().toISOString().slice(0, 7);
   const atrasadas = rows.filter((r) => !r.pago && r.mes < today);
   const vincendas = rows.filter((r) => !r.pago && r.mes >= today);
   const pagas     = rows.filter((r) => r.pago);
-
   const totalPendente = [...atrasadas, ...vincendas].reduce((s, r) => s + r.valor, 0);
 
   if (isLoading) return <Skeleton className="h-64 rounded-xl" />;
@@ -60,24 +73,25 @@ export default function Pendencias() {
         <p className="text-sm text-muted-foreground">
           {atrasadas.length + vincendas.length} pendente{(atrasadas.length + vincendas.length) !== 1 ? "s" : ""} · {fmtBRL(totalPendente)}
         </p>
-        <Button size="sm" onClick={() => { setForm(empty()); setOpen(true); }} className="bg-[#C8DA2D] text-[#0C1923] hover:bg-[#d4e640]">
+        <Button size="sm" onClick={openCreate} className="bg-[#C8DA2D] text-[#0C1923] hover:bg-[#d4e640]">
           <Plus size={14} className="mr-1" /> Nova Dívida
         </Button>
       </div>
 
-      {/* Atrasadas */}
       {atrasadas.length > 0 && (
         <div>
           <h3 className="text-sm font-semibold text-red-400 mb-2">Atrasadas ({atrasadas.length})</h3>
           <div className="space-y-1">
             {atrasadas.map((r) => (
-              <DividaRow key={r.id} item={r} onMark={() => update.mutate({ id: r.id, d: { pago: true } })} onDelete={() => del.mutate(r.id)} atrasada />
+              <DividaRow key={r.id} item={r}
+                onMark={() => update.mutate({ id: r.id, d: { pago: true } })}
+                onEdit={() => openEdit(r)}
+                onDelete={() => del.mutate(r.id)} atrasada />
             ))}
           </div>
         </div>
       )}
 
-      {/* A vencer */}
       <div>
         <h3 className="text-sm font-semibold text-amber-400 mb-2">A Vencer ({vincendas.length})</h3>
         {vincendas.length === 0 ? (
@@ -85,13 +99,15 @@ export default function Pendencias() {
         ) : (
           <div className="space-y-1">
             {vincendas.map((r) => (
-              <DividaRow key={r.id} item={r} onMark={() => update.mutate({ id: r.id, d: { pago: true } })} onDelete={() => del.mutate(r.id)} />
+              <DividaRow key={r.id} item={r}
+                onMark={() => update.mutate({ id: r.id, d: { pago: true } })}
+                onEdit={() => openEdit(r)}
+                onDelete={() => del.mutate(r.id)} />
             ))}
           </div>
         )}
       </div>
 
-      {/* Pagas */}
       {pagas.length > 0 && (
         <details className="text-xs">
           <summary className="cursor-pointer text-muted-foreground hover:text-foreground select-none">
@@ -99,15 +115,17 @@ export default function Pendencias() {
           </summary>
           <div className="mt-2 space-y-1">
             {pagas.map((r) => (
-              <DividaRow key={r.id} item={r} onDelete={() => del.mutate(r.id)} paid />
+              <DividaRow key={r.id} item={r}
+                onEdit={() => openEdit(r)}
+                onDelete={() => del.mutate(r.id)} paid />
             ))}
           </div>
         </details>
       )}
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) setEditing(null); }}>
         <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Nova Dívida / Pendência</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{editing ? "Editar Dívida" : "Nova Dívida / Pendência"}</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
             <div>
               <Label>Descrição</Label>
@@ -129,9 +147,9 @@ export default function Pendencias() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
-            <Button onClick={() => create.mutate({ ...form, dia: parseInt(form.dia), valor: parseFloat(form.valor) })} disabled={!form.descricao || !form.valor || create.isPending} className="bg-[#C8DA2D] text-[#0C1923] hover:bg-[#d4e640]">
-              Registrar
+            <Button variant="outline" onClick={() => { setOpen(false); setEditing(null); }}>Cancelar</Button>
+            <Button onClick={handleSubmit} disabled={!form.descricao || !form.valor || create.isPending || update.isPending} className="bg-[#C8DA2D] text-[#0C1923] hover:bg-[#d4e640]">
+              {editing ? "Salvar" : "Registrar"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -140,8 +158,8 @@ export default function Pendencias() {
   );
 }
 
-function DividaRow({ item, onMark, onDelete, atrasada, paid }: {
-  item: Divida; onMark?: () => void; onDelete: () => void; atrasada?: boolean; paid?: boolean;
+function DividaRow({ item, onMark, onEdit, onDelete, atrasada, paid }: {
+  item: Divida; onMark?: () => void; onEdit: () => void; onDelete: () => void; atrasada?: boolean; paid?: boolean;
 }) {
   return (
     <div className={cn(
@@ -161,6 +179,7 @@ function DividaRow({ item, onMark, onDelete, atrasada, paid }: {
           <Check size={15} />
         </button>
       )}
+      <button onClick={onEdit} className="text-muted-foreground hover:text-blue-400 transition-colors"><Pencil size={13} /></button>
       <button onClick={onDelete} className="text-muted-foreground hover:text-red-500 transition-colors"><Trash2 size={13} /></button>
     </div>
   );

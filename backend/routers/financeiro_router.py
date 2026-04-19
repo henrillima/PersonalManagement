@@ -376,6 +376,10 @@ class TerceiroUpdate(BaseModel):
     recebido: Optional[bool] = None
     valor: Optional[float] = None
     descricao: Optional[str] = None
+    pessoa: Optional[str] = None
+    origem: Optional[str] = None
+    mes_alvo: Optional[str] = None
+    dia: Optional[int] = None
 
 @router.get("/terceiros")
 def list_terceiros(_: str = Depends(verify_token)):
@@ -410,6 +414,8 @@ class DividaUpdate(BaseModel):
     pago: Optional[bool] = None
     valor: Optional[float] = None
     descricao: Optional[str] = None
+    mes: Optional[str] = None
+    dia: Optional[int] = None
 
 @router.get("/dividas")
 def list_dividas(_: str = Depends(verify_token)):
@@ -431,6 +437,71 @@ def update_divida(divida_id: str, body: DividaUpdate, _: str = Depends(verify_to
 @router.delete("/dividas/{divida_id}", status_code=204)
 def delete_divida(divida_id: str, _: str = Depends(verify_token)):
     get_db().table("dividas").delete().eq("id", divida_id).execute()
+
+
+# ══ DESPESAS ATRASADAS ════════════════════════════════════════════════════════
+
+@router.get("/despesas-atrasadas")
+def get_despesas_atrasadas(_: str = Depends(verify_token)):
+    from datetime import date
+    db = get_db()
+    today = date.today()
+    cur_mes = today.strftime("%Y-%m")
+    cur_day = today.day
+
+    items = []
+
+    # Pontuais despesa: pago=False e (mes < cur) ou (mes == cur e dia < hoje)
+    pontuais = db.table("fluxos_pontuais").select("*").eq("tipo", "despesa").eq("pago", False).execute().data
+    for p in pontuais:
+        mes = p.get("mes_alvo", "")
+        dia = p.get("dia", 0)
+        if mes < cur_mes or (mes == cur_mes and dia < cur_day):
+            items.append({
+                "tipo": "pontual",
+                "id": p["id"],
+                "descricao": p.get("descricao", ""),
+                "categoria": p.get("categoria", ""),
+                "valor": float(p.get("valor", 0)),
+                "mes": mes,
+                "dia": dia,
+            })
+
+    # Dívidas: pago=False e (mes < cur) ou (mes == cur e dia < hoje)
+    dividas = db.table("dividas").select("*").eq("pago", False).execute().data
+    for d in dividas:
+        mes = d.get("mes", "")
+        dia = d.get("dia", 0)
+        if mes < cur_mes or (mes == cur_mes and dia < cur_day):
+            items.append({
+                "tipo": "divida",
+                "id": d["id"],
+                "descricao": d.get("descricao", ""),
+                "categoria": "Dívidas / Pendências",
+                "valor": float(d.get("valor", 0)),
+                "mes": mes,
+                "dia": dia,
+            })
+
+    # Terceiros a receber: recebido=False e (mes_alvo < cur) ou (mes_alvo == cur e dia < hoje)
+    terceiros = db.table("terceiros").select("*").eq("recebido", False).execute().data
+    for t in terceiros:
+        mes = t.get("mes_alvo", "")
+        dia = t.get("dia", 0)
+        if mes < cur_mes or (mes == cur_mes and dia < cur_day):
+            items.append({
+                "tipo": "terceiro",
+                "id": t["id"],
+                "descricao": t.get("descricao", ""),
+                "categoria": f"A Receber ({t.get('pessoa', '')})",
+                "valor": float(t.get("valor", 0)),
+                "mes": mes,
+                "dia": dia,
+                "receita": True,
+            })
+
+    items.sort(key=lambda x: (x["mes"], x["dia"]))
+    return items
 
 
 # ══ DASHBOARD ════════════════════════════════════════════════════════════════
