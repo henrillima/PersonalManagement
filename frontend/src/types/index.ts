@@ -360,6 +360,12 @@ export interface Meta {
   status: "ativa" | "conquistada" | "abandonada";
   progresso: number;
   emoji: string;
+  tipo: "qualitativa" | "numerica";
+  direcao: "crescente" | "decrescente";
+  valor_inicial: number | null;
+  valor_atual: number | null;
+  valor_alvo: number | null;
+  unidade: string | null;
   criado_em: string;
 }
 

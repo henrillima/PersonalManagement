@@ -1,8 +1,40 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch, fmtBRL, fmtDate } from "@/lib/api";
-import type { HomeResumo, TarefaResumo, DespesaResumo, EventoAgenda } from "@/types";
+
+// ── Area helpers (shared with Metas.tsx) ──────────────────────────────────────
+interface AreaDef { value: string; label: string; emoji: string; cor: string; }
+const DEFAULT_AREAS: AreaDef[] = [
+  { value: "pessoal",         label: "Pessoal",         emoji: "🧑",  cor: "#8b5cf6" },
+  { value: "financeiro",      label: "Financeiro",      emoji: "💰",  cor: "#22c55e" },
+  { value: "carreira",        label: "Carreira",        emoji: "💼",  cor: "#3b82f6" },
+  { value: "saude",           label: "Saúde",           emoji: "❤️",  cor: "#f43f5e" },
+  { value: "educacao",        label: "Educação",        emoji: "📚",  cor: "#f59e0b" },
+  { value: "relacionamentos", label: "Relacionamentos", emoji: "👥",  cor: "#ec4899" },
+  { value: "viagens",         label: "Viagens",         emoji: "🌍",  cor: "#14b8a6" },
+  { value: "lazer",           label: "Lazer",           emoji: "🎮",  cor: "#f97316" },
+];
+function loadAreas(): AreaDef[] {
+  try { const s = localStorage.getItem("metas_areas_v1"); return s ? JSON.parse(s) : DEFAULT_AREAS; }
+  catch { return DEFAULT_AREAS; }
+}
+function calcMetaProgress(m: Meta): number {
+  if (m.tipo === "numerica" && m.valor_alvo != null && m.valor_inicial != null && m.valor_atual != null) {
+    const range = Math.abs(m.valor_alvo - m.valor_inicial);
+    if (range === 0) return 100;
+    const p = m.direcao === "crescente"
+      ? (m.valor_atual - m.valor_inicial) / range * 100
+      : (m.valor_inicial - m.valor_atual) / range * 100;
+    return Math.min(100, Math.max(0, p));
+  }
+  return m.progresso;
+}
+function fmtNumMeta(n: number, u?: string | null) {
+  const s = n % 1 === 0 ? n.toLocaleString("pt-BR") : n.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+  return u ? `${s} ${u}` : s;
+}
+import type { HomeResumo, TarefaResumo, DespesaResumo, EventoAgenda, Meta } from "@/types";
 import { cn } from "@/lib/utils";
-import { AlertTriangle, CalendarDays, Wallet, ArrowRight, CalendarClock } from "lucide-react";
+import { AlertTriangle, CalendarDays, Wallet, ArrowRight, CalendarClock, Trophy } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useNavigate } from "react-router-dom";
 
@@ -41,6 +73,18 @@ export default function Home() {
     queryFn: () => apiFetch("/api/v1/home/resumo"),
     refetchInterval: 60_000,
   });
+
+  const areas = loadAreas();
+
+  const { data: metas = [] } = useQuery<Meta[]>({
+    queryKey: ["metas"],
+    queryFn: () => apiFetch("/api/v1/metas"),
+    staleTime: 5 * 60 * 1000,
+  });
+  const metasAtivas = metas
+    .filter(m => m.status === "ativa")
+    .sort((a, b) => calcMetaProgress(a) - calcMetaProgress(b))
+    .slice(0, 6);
 
   const hoje = new Date().toISOString().slice(0, 10);
   const { data: agendaHoje = [] } = useQuery<EventoAgenda[]>({
@@ -96,6 +140,29 @@ export default function Home() {
           onClick={() => navigate("/financeiro/pontuais")}
         />
       </div>
+
+      {/* Metas de vida */}
+      {metasAtivas.length > 0 && (
+        <section>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="flex items-center gap-2 text-sm font-semibold">
+              <Trophy size={15} className="text-[#C8DA2D]" />
+              Metas de vida
+            </h2>
+            <button
+              onClick={() => navigate("/metas")}
+              className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+            >
+              Ver todas <ArrowRight size={12} />
+            </button>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {metasAtivas.map(m => (
+              <MetaHomeCard key={m.id} meta={m} areas={areas} />
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Main grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -330,6 +397,41 @@ function AgendaItem({ evento }: { evento: EventoAgenda }) {
       <div className="flex-1 min-w-0">
         <p className="text-sm leading-snug truncate">{evento.title}</p>
         <p className="text-[10px] text-muted-foreground mt-0.5">{fmt(start)} – {fmt(end)}</p>
+      </div>
+    </div>
+  );
+}
+
+function MetaHomeCard({ meta, areas }: { meta: Meta; areas: AreaDef[] }) {
+  const area = areas.find(a => a.value === meta.area);
+  const cor  = area?.cor ?? "#94a3b8";
+  const pct  = Math.round(calcMetaProgress(meta));
+
+  return (
+    <div
+      className="bg-card border rounded-xl p-4 flex items-center gap-3 hover:shadow-sm transition-all"
+      style={{ borderLeftWidth: 3, borderLeftColor: cor }}
+    >
+      <span className="text-2xl leading-none shrink-0">{meta.emoji}</span>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium truncate">{meta.titulo}</p>
+        {meta.tipo === "numerica" && meta.valor_atual != null && meta.valor_alvo != null ? (
+          <p className="text-[10px] text-muted-foreground mt-0.5">
+            {fmtNumMeta(meta.valor_atual, meta.unidade)}
+            <span className="mx-1 opacity-40">→</span>
+            {fmtNumMeta(meta.valor_alvo, meta.unidade)}
+          </p>
+        ) : area ? (
+          <p className="text-[10px] text-muted-foreground mt-0.5">{area.emoji} {area.label}</p>
+        ) : null}
+        <div className="mt-2 flex items-center gap-2">
+          <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+            <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: cor }} />
+          </div>
+          <span className="text-[10px] font-bold tabular-nums shrink-0" style={{ color: cor }}>
+            {pct}%
+          </span>
+        </div>
       </div>
     </div>
   );

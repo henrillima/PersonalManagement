@@ -14,6 +14,12 @@ class MetaCreate(BaseModel):
     prazo: Optional[str] = None
     emoji: str = "🎯"
     progresso: int = 0
+    tipo: str = "qualitativa"
+    direcao: str = "crescente"
+    valor_inicial: Optional[float] = None
+    valor_atual: Optional[float] = None
+    valor_alvo: Optional[float] = None
+    unidade: Optional[str] = None
 
 
 class MetaUpdate(BaseModel):
@@ -24,6 +30,12 @@ class MetaUpdate(BaseModel):
     emoji: Optional[str] = None
     progresso: Optional[int] = None
     status: Optional[str] = None
+    tipo: Optional[str] = None
+    direcao: Optional[str] = None
+    valor_inicial: Optional[float] = None
+    valor_atual: Optional[float] = None
+    valor_alvo: Optional[float] = None
+    unidade: Optional[str] = None
 
 
 @router.get("/metas")
