@@ -11,7 +11,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import {
   Plus, Trash2, GripVertical, Clock, Archive, RotateCcw,
-  Settings, ChevronDown, ChevronRight, Pencil, Check, X,
+  Settings, ChevronDown, ChevronLeft, ChevronRight, Pencil, Check, X,
 } from "lucide-react";
 import { apiFetch, fmtDate } from "@/lib/api";
 import type { Tarefa, Frente, TarefaStatus, Prioridade, CategoriaItem, TarefaRecorrenteOcorrencia } from "@/types";
@@ -59,6 +59,17 @@ function isOverdue(t: Tarefa) {
   return t.status !== "done" && !!t.data_limite && t.data_limite < TODAY;
 }
 
+function addMonths(ym: string, delta: number): string {
+  const [y, m] = ym.split("-").map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function fmtMes(ym: string): string {
+  const [y, m] = ym.split("-").map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+}
+
 // ── Form ───────────────────────────────────────────────────────────────────────
 
 interface TarefaForm {
@@ -104,6 +115,8 @@ export default function Tarefas() {
   const [activeTask, setActiveTask]     = useState<Tarefa | null>(null);
   const [manageOpen, setManageOpen]     = useState(false);
   const [recOpenCreate, setRecOpenCreate] = useState(false);
+  const [mesOcorrencias, setMesOcorrencias] = useState(MES_ATUAL);
+  const [dateFilter, setDateFilter] = useState<"all" | "week" | "15d" | "month">("all");
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
@@ -130,8 +143,8 @@ export default function Tarefas() {
   });
 
   const { data: ocorrencias = [] } = useQuery<TarefaRecorrenteOcorrencia[]>({
-    queryKey: ["ocorrencias-mes", MES_ATUAL],
-    queryFn: () => apiFetch(`/api/v1/tarefas-recorrentes/ocorrencias?mes=${MES_ATUAL}`),
+    queryKey: ["ocorrencias-mes", mesOcorrencias],
+    queryFn: () => apiFetch(`/api/v1/tarefas-recorrentes/ocorrencias?mes=${mesOcorrencias}`),
     enabled: catTab !== "arquivo" && catTab !== "recorrentes",
   });
 
@@ -188,7 +201,7 @@ export default function Tarefas() {
   const toggleOcorrencia = useMutation({
     mutationFn: ({ id, concluida }: { id: string; concluida: boolean }) =>
       apiFetch(`/api/v1/tarefas-recorrentes/ocorrencias/${id}`, { method: "PATCH", body: JSON.stringify({ concluida }) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["ocorrencias-mes", MES_ATUAL] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["ocorrencias-mes", mesOcorrencias] }),
   });
 
   const createProjeto = useMutation({
@@ -239,8 +252,17 @@ export default function Tarefas() {
   const visible = useMemo(() => catTasks.filter(t => {
     if (frenteFilter !== "all" && (t.frente_id ?? "") !== frenteFilter) return false;
     if (priorFilter  !== "all" && t.prioridade !== priorFilter) return false;
+    if (dateFilter !== "all" && t.data_limite) {
+      const now = new Date(); now.setHours(0, 0, 0, 0);
+      const dl  = new Date(t.data_limite + "T00:00:00");
+      const end = new Date(now);
+      if (dateFilter === "week")  end.setDate(now.getDate() + 7);
+      if (dateFilter === "15d")   end.setDate(now.getDate() + 15);
+      if (dateFilter === "month") end.setDate(now.getDate() + 30);
+      if (dl > end) return false;
+    }
     return true;
-  }), [catTasks, frenteFilter, priorFilter]);
+  }), [catTasks, frenteFilter, priorFilter, dateFilter]);
 
   const visibleOcorrencias = useMemo(() => {
     if (catTab === "arquivo" || catTab === "recorrentes") return [];
@@ -449,22 +471,39 @@ export default function Tarefas() {
       ) : (
         <>
           {/* Filters */}
-          <div className="flex gap-1.5 flex-wrap">
-            <FilterPill active={frenteFilter === "all"} onClick={() => setFrenteFilter("all")}>Todos os projetos</FilterPill>
-            {projetosForTab.map(f => (
-              <FilterPill key={f.id} active={frenteFilter === f.id} color={f.cor}
-                onClick={() => setFrenteFilter(frenteFilter === f.id ? "all" : f.id)}>
-                {f.nome}
-              </FilterPill>
-            ))}
-            <span className="w-px bg-border self-stretch mx-1" />
-            <FilterPill active={priorFilter === "all"} onClick={() => setPriorFilter("all")}>Todas prioridades</FilterPill>
-            {PRIORIDADES.map(p => (
-              <FilterPill key={p.value} active={priorFilter === p.value} color={p.cor}
-                onClick={() => setPriorFilter(priorFilter === p.value ? "all" : p.value)}>
-                {p.label}
-              </FilterPill>
-            ))}
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex gap-1.5 flex-wrap">
+              <FilterPill active={frenteFilter === "all"} onClick={() => setFrenteFilter("all")}>Todos os projetos</FilterPill>
+              {projetosForTab.map(f => (
+                <FilterPill key={f.id} active={frenteFilter === f.id} color={f.cor}
+                  onClick={() => setFrenteFilter(frenteFilter === f.id ? "all" : f.id)}>
+                  {f.nome}
+                </FilterPill>
+              ))}
+              <span className="w-px bg-border self-stretch mx-1" />
+              <FilterPill active={priorFilter === "all"} onClick={() => setPriorFilter("all")}>Todas prioridades</FilterPill>
+              {PRIORIDADES.map(p => (
+                <FilterPill key={p.value} active={priorFilter === p.value} color={p.cor}
+                  onClick={() => setPriorFilter(priorFilter === p.value ? "all" : p.value)}>
+                  {p.label}
+                </FilterPill>
+              ))}
+              <span className="w-px bg-border self-stretch mx-1" />
+              <FilterPill active={dateFilter === "all"} onClick={() => setDateFilter("all")}>📅 Todos os prazos</FilterPill>
+              <FilterPill active={dateFilter === "week"}  onClick={() => setDateFilter(dateFilter === "week"  ? "all" : "week")}>7 dias</FilterPill>
+              <FilterPill active={dateFilter === "15d"}   onClick={() => setDateFilter(dateFilter === "15d"   ? "all" : "15d")}>15 dias</FilterPill>
+              <FilterPill active={dateFilter === "month"} onClick={() => setDateFilter(dateFilter === "month" ? "all" : "month")}>30 dias</FilterPill>
+            </div>
+            <div className="flex items-center gap-1 shrink-0 border border-border rounded-lg px-2 py-1 text-xs text-muted-foreground">
+              <span className="text-[11px]">🔁</span>
+              <button onClick={() => setMesOcorrencias(m => addMonths(m, -1))} className="p-0.5 hover:text-foreground transition-colors">
+                <ChevronLeft size={12} />
+              </button>
+              <span className="capitalize font-medium min-w-[100px] text-center">{fmtMes(mesOcorrencias)}</span>
+              <button onClick={() => setMesOcorrencias(m => addMonths(m, 1))} className="p-0.5 hover:text-foreground transition-colors">
+                <ChevronRight size={12} />
+              </button>
+            </div>
           </div>
 
           {/* Kanban */}
@@ -1021,7 +1060,9 @@ function RecorrenteCard({ oc, showCategoria, onToggle }: {
   return (
     <div className={cn(
       "bg-card border border-dashed rounded-xl p-3 transition-all",
-      oc.concluida ? "border-border opacity-50" : "border-indigo-400/30 hover:border-indigo-400/50",
+      oc.concluida
+        ? "border-green-400/25 opacity-60"
+        : "border-indigo-400/30 hover:border-indigo-400/50",
     )}>
       <div className="flex items-start gap-1.5">
         <div className="w-3 shrink-0" />
@@ -1053,11 +1094,17 @@ function RecorrenteCard({ oc, showCategoria, onToggle }: {
             📅 {new Date(oc.data_alvo + "T00:00:00").toLocaleDateString("pt-BR")}
           </p>
         </div>
-        <button onClick={onToggle}
-          className={cn("shrink-0 p-1 rounded transition-colors",
-            oc.concluida ? "text-green-400 hover:text-muted-foreground" : "text-muted-foreground hover:text-green-400"
-          )}>
-          <Check size={13} />
+        <button
+          onClick={onToggle}
+          className={cn(
+            "shrink-0 flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full transition-colors mt-0.5",
+            oc.concluida
+              ? "bg-green-400/15 text-green-400 hover:bg-red-400/15 hover:text-red-400"
+              : "bg-muted text-muted-foreground hover:bg-green-400/15 hover:text-green-400"
+          )}
+        >
+          <Check size={9} />
+          {oc.concluida ? "Desfazer" : "Feita"}
         </button>
       </div>
     </div>

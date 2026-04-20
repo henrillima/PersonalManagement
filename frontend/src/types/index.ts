@@ -349,6 +349,20 @@ export interface ItemEstudo {
   criado_em: string;
 }
 
+// ── Metas de Vida ─────────────────────────────────────────────────────────────
+
+export interface Meta {
+  id: string;
+  titulo: string;
+  descricao: string | null;
+  area: string;
+  prazo: string | null;
+  status: "ativa" | "conquistada" | "abandonada";
+  progresso: number;
+  emoji: string;
+  criado_em: string;
+}
+
 // ── Saúde ─────────────────────────────────────────────────────────────────────
 
 export interface SaudePerfil {
