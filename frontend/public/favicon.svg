@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <!-- Background: dark navy rounded square -->
+  <rect width="32" height="32" rx="7" fill="#0C1923"/>
+  <!-- Power symbol vertical line -->
+  <line x1="16" y1="7" x2="16" y2="14.5" stroke="#C8DA2D" stroke-width="2.8" stroke-linecap="round"/>
+  <!-- Power symbol arc (large arc, clockwise, gap at top) -->
+  <path d="M21.7 10.2 A8 8 0 1 1 10.3 10.2" stroke="#C8DA2D" stroke-width="2.8" stroke-linecap="round" fill="none"/>
+  <!-- Small accent dot bottom-right -->
+  <circle cx="24.5" cy="24.5" r="1.8" fill="#C8DA2D" opacity="0.35"/>
+</svg>

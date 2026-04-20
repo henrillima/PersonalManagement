@@ -67,9 +67,16 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
       )}
     >
       {/* Brand */}
-      <div className="px-5 py-5 border-b border-white/10">
-        <div className="text-white text-base font-semibold tracking-tight">Life OS</div>
-        <div className="text-white/30 text-[11px] mt-0.5">Gestão pessoal</div>
+      <div className="px-4 py-4 border-b border-white/10 flex items-center gap-3">
+        <svg width="34" height="34" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" className="flex-shrink-0">
+          <rect width="32" height="32" rx="7" fill="#C8DA2D"/>
+          <line x1="16" y1="7" x2="16" y2="14.5" stroke="#0C1923" strokeWidth="2.8" strokeLinecap="round"/>
+          <path d="M21.7 10.2 A8 8 0 1 1 10.3 10.2" stroke="#0C1923" strokeWidth="2.8" strokeLinecap="round" fill="none"/>
+        </svg>
+        <div>
+          <div className="text-white text-[15px] font-bold tracking-tight leading-none">Life OS</div>
+          <div className="text-white/30 text-[10px] mt-1 leading-none">Henri Lima</div>
+        </div>
       </div>
 
       {/* Navigation */}
