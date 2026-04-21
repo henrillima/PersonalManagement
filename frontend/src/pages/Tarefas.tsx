@@ -44,14 +44,11 @@ const COLUMNS: { id: TarefaStatus; label: string; bg: string }[] = [
 
 const COLUMN_IDS = new Set(COLUMNS.map(c => c.id as string));
 
-const FILA_KEY = "fila_execucao_v1";
 function addTaskToFila(tarefaId: string, titulo: string, frenteCor: string | null, frenteNome: string | null) {
-  try {
-    const existing: Array<{ tarefaId: string }> = JSON.parse(localStorage.getItem(FILA_KEY) ?? "[]");
-    if (existing.some(f => f.tarefaId === tarefaId)) return;
-    const item = { id: crypto.randomUUID(), tarefaId, titulo, frenteCor, frenteNome, tempoMin: 25 };
-    localStorage.setItem(FILA_KEY, JSON.stringify([...existing, item]));
-  } catch { /* ignore */ }
+  apiFetch("/api/v1/fila", {
+    method: "POST",
+    body: JSON.stringify({ tarefa_id: tarefaId, titulo, frente_cor: frenteCor, frente_nome: frenteNome, tempo_min: 25 }),
+  }).catch(() => {}); // fire-and-forget; 409 = already in queue (ignore)
 }
 
 const PRIORIDADES: { value: Prioridade; label: string; cor: string }[] = [
