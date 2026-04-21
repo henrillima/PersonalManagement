@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   DndContext,
   closestCenter,
@@ -64,6 +64,7 @@ function saveFila(items: FilaItem[]) {
 // ── Main ───────────────────────────────────────────────────────────────────────
 
 export default function Foco() {
+  const qc = useQueryClient();
   const [fila, setFila] = useState<FilaItem[]>(loadFila);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -144,9 +145,23 @@ export default function Foco() {
     }]);
   }
 
+  const completeTarefa = useMutation({
+    mutationFn: (tarefaId: string) =>
+      apiFetch(`/api/v1/tarefas/${tarefaId}`, { method: "PATCH", body: JSON.stringify({ status: "done", concluida: true }) }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["tarefas"] });
+      qc.invalidateQueries({ queryKey: ["tarefas-foco"] });
+    },
+  });
+
   function removeFromFila(id: string) {
     updateFila(fila.filter(f => f.id !== id));
     setTimers(prev => { const next = { ...prev }; delete next[id]; return next; });
+  }
+
+  function completeAndRemove(item: FilaItem) {
+    removeFromFila(item.id);
+    completeTarefa.mutate(item.tarefaId);
   }
 
   function updateTempo(id: string, min: number) {
@@ -252,7 +267,7 @@ export default function Foco() {
                   index={index}
                   timer={timers[item.id]}
                   onRemove={() => removeFromFila(item.id)}
-                  onComplete={() => removeFromFila(item.id)}
+                  onComplete={() => completeAndRemove(item)}
                   onTempoChange={min => updateTempo(item.id, min)}
                   onTimerToggle={() => toggleTimer(item)}
                   onTimerReset={() => resetTimer(item.id)}
