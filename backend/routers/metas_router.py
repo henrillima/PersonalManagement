@@ -41,7 +41,7 @@ class MetaUpdate(BaseModel):
 @router.get("/metas")
 def list_metas(user=Depends(verify_token)):
     db = get_db()
-    res = db.table("metas_vida").select("*").eq("user_id", user["sub"]).order("criado_em").execute()
+    res = db.table("metas_vida").select("*").eq("user_id", user).order("criado_em").execute()
     return res.data
 
 
@@ -49,7 +49,7 @@ def list_metas(user=Depends(verify_token)):
 def create_meta(body: MetaCreate, user=Depends(verify_token)):
     db = get_db()
     row = body.model_dump()
-    row["user_id"] = user["sub"]
+    row["user_id"] = user
     res = db.table("metas_vida").insert(row).execute()
     return res.data[0]
 
@@ -62,7 +62,7 @@ def update_meta(meta_id: str, body: MetaUpdate, user=Depends(verify_token)):
         db.table("metas_vida")
         .update(data)
         .eq("id", meta_id)
-        .eq("user_id", user["sub"])
+        .eq("user_id", user)
         .execute()
     )
     if not res.data:
@@ -73,4 +73,4 @@ def update_meta(meta_id: str, body: MetaUpdate, user=Depends(verify_token)):
 @router.delete("/metas/{meta_id}", status_code=204)
 def delete_meta(meta_id: str, user=Depends(verify_token)):
     db = get_db()
-    db.table("metas_vida").delete().eq("id", meta_id).eq("user_id", user["sub"]).execute()
+    db.table("metas_vida").delete().eq("id", meta_id).eq("user_id", user).execute()
