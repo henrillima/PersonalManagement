@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   DndContext,
@@ -15,13 +15,16 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical, Plus, X, Check, Clock, ListOrdered, Play } from "lucide-react";
-import { apiFetch } from "@/lib/api";
+import { GripVertical, Plus, X, Check, Clock, ListOrdered, Play, ArrowUpDown, CalendarClock } from "lucide-react";
+import { apiFetch, fmtDate } from "@/lib/api";
 import type { Tarefa } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+
+type SortField = "titulo" | "categoria" | "data_limite" | "prioridade";
+type SortDir = "asc" | "desc";
 
 // ── Types & localStorage ───────────────────────────────────────────────────────
 
@@ -53,6 +56,9 @@ export default function Foco() {
   const [fila, setFila] = useState<FilaItem[]>(loadFila);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const [filterCat, setFilterCat] = useState("all");
+  const [sortField, setSortField] = useState<SortField>("titulo");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
 
   const { data: tarefas = [] } = useQuery<Tarefa[]>({
     queryKey: ["tarefas-foco"],
@@ -98,11 +104,41 @@ export default function Foco() {
     }
   }
 
-  const disponiveis = tarefas.filter(t =>
-    !t.concluida && !t.arquivado &&
-    !fila.some(f => f.tarefaId === t.id) &&
-    (search === "" || t.titulo.toLowerCase().includes(search.toLowerCase()))
-  );
+  const categorias = useMemo(() => {
+    const set = new Set(tarefas.filter(t => !t.concluida && !t.arquivado).map(t => t.categoria).filter(Boolean));
+    return Array.from(set).sort() as string[];
+  }, [tarefas]);
+
+  const PRIO_ORDER: Record<string, number> = { alta: 0, media: 1, baixa: 2 };
+
+  const disponiveis = useMemo(() => {
+    const base = tarefas.filter(t =>
+      !t.concluida && !t.arquivado &&
+      !fila.some(f => f.tarefaId === t.id) &&
+      (search === "" || t.titulo.toLowerCase().includes(search.toLowerCase())) &&
+      (filterCat === "all" || t.categoria === filterCat)
+    );
+    return [...base].sort((a, b) => {
+      let cmp = 0;
+      if (sortField === "titulo") {
+        cmp = a.titulo.localeCompare(b.titulo, "pt-BR");
+      } else if (sortField === "categoria") {
+        cmp = (a.categoria ?? "").localeCompare(b.categoria ?? "", "pt-BR");
+      } else if (sortField === "data_limite") {
+        const da = a.data_limite ?? "9999";
+        const db = b.data_limite ?? "9999";
+        cmp = da < db ? -1 : da > db ? 1 : 0;
+      } else if (sortField === "prioridade") {
+        cmp = (PRIO_ORDER[a.prioridade] ?? 9) - (PRIO_ORDER[b.prioridade] ?? 9);
+      }
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+  }, [tarefas, fila, search, filterCat, sortField, sortDir]);
+
+  function toggleSort(field: SortField) {
+    if (sortField === field) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortField(field); setSortDir("asc"); }
+  }
 
   const totalMin = fila.reduce((acc, f) => acc + (f.tempoMin || 0), 0);
   const horas = Math.floor(totalMin / 60);
@@ -168,18 +204,59 @@ export default function Foco() {
 
       {/* Task picker dialog */}
       <Dialog open={pickerOpen} onOpenChange={setPickerOpen}>
-        <DialogContent className="max-w-md flex flex-col" style={{ maxHeight: "80vh" }}>
+        <DialogContent className="max-w-lg flex flex-col" style={{ maxHeight: "85vh" }}>
           <DialogHeader>
             <DialogTitle>Adicionar à fila</DialogTitle>
           </DialogHeader>
-          <Input
-            placeholder="Buscar tarefa..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="mt-1"
-            autoFocus
-          />
-          <div className="flex-1 overflow-y-auto space-y-0.5 mt-2 pr-1">
+
+          {/* Search + category filter */}
+          <div className="space-y-2 mt-1">
+            <Input
+              placeholder="Buscar tarefa..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              autoFocus
+            />
+            {categorias.length > 0 && (
+              <div className="flex gap-1.5 flex-wrap">
+                <button
+                  onClick={() => setFilterCat("all")}
+                  className={cn(
+                    "px-2.5 py-1 rounded-full text-xs font-medium border transition-colors",
+                    filterCat === "all"
+                      ? "bg-foreground text-background border-foreground"
+                      : "border-border text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  Todas
+                </button>
+                {categorias.map(c => (
+                  <button
+                    key={c}
+                    onClick={() => setFilterCat(filterCat === c ? "all" : c)}
+                    className={cn(
+                      "px-2.5 py-1 rounded-full text-xs font-medium border transition-colors",
+                      filterCat === c
+                        ? "bg-foreground text-background border-foreground"
+                        : "border-border text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    {c}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Sort header */}
+          <div className="grid grid-cols-[1fr_auto_auto] gap-2 px-3 py-1.5 border-b border-border mt-1">
+            <SortButton label="Tarefa / Projeto" field="titulo" active={sortField} dir={sortDir} onToggle={toggleSort} />
+            <SortButton label="Categoria" field="categoria" active={sortField} dir={sortDir} onToggle={toggleSort} />
+            <SortButton label="Prazo" field="data_limite" active={sortField} dir={sortDir} onToggle={toggleSort} />
+          </div>
+
+          {/* List */}
+          <div className="flex-1 overflow-y-auto space-y-0.5 pr-1">
             {disponiveis.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-8">
                 {tarefas.length === 0 ? "Nenhuma tarefa cadastrada." : "Nenhuma tarefa disponível."}
@@ -189,23 +266,41 @@ export default function Foco() {
                 <button
                   key={t.id}
                   onClick={() => addToFila(t)}
-                  className="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-muted/60 transition-colors group"
+                  className="w-full text-left grid grid-cols-[1fr_auto_auto_auto] items-center gap-2 px-3 py-2.5 rounded-lg hover:bg-muted/60 transition-colors group"
                 >
-                  {t.frente_cor ? (
-                    <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: t.frente_cor }} />
-                  ) : (
-                    <div className="w-2 h-2 rounded-full shrink-0 bg-border" />
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{t.titulo}</p>
-                    {t.frente_nome && (
-                      <p className="text-[10px] text-muted-foreground">{t.frente_nome}</p>
-                    )}
+                  {/* Title + project */}
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div
+                      className="w-1.5 h-1.5 rounded-full shrink-0"
+                      style={{ backgroundColor: t.frente_cor ?? "#94a3b8" }}
+                    />
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{t.titulo}</p>
+                      {t.frente_nome && (
+                        <p className="text-[10px] text-muted-foreground truncate">{t.frente_nome}</p>
+                      )}
+                    </div>
                   </div>
-                  <Plus
-                    size={14}
-                    className="text-muted-foreground group-hover:text-[#C8DA2D] transition-colors shrink-0"
-                  />
+
+                  {/* Categoria */}
+                  <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-muted text-muted-foreground whitespace-nowrap">
+                    {t.categoria ?? "—"}
+                  </span>
+
+                  {/* Prazo */}
+                  <span className={cn(
+                    "text-[10px] whitespace-nowrap flex items-center gap-0.5",
+                    t.data_limite
+                      ? new Date(t.data_limite) < new Date() ? "text-red-500" : "text-muted-foreground"
+                      : "text-muted-foreground/40"
+                  )}>
+                    {t.data_limite ? (
+                      <><CalendarClock size={10} />{fmtDate(t.data_limite)}</>
+                    ) : "—"}
+                  </span>
+
+                  {/* Add icon */}
+                  <Plus size={14} className="text-muted-foreground group-hover:text-[#C8DA2D] transition-colors shrink-0" />
                 </button>
               ))
             )}
@@ -303,5 +398,30 @@ function SortableFilaItem({ item, index, onRemove, onComplete, onTempoChange }: 
         <X size={15} />
       </button>
     </div>
+  );
+}
+
+// ── SortButton ─────────────────────────────────────────────────────────────────
+
+function SortButton({ label, field, active, dir, onToggle }: {
+  label: string;
+  field: SortField;
+  active: SortField;
+  dir: SortDir;
+  onToggle: (f: SortField) => void;
+}) {
+  const isActive = active === field;
+  return (
+    <button
+      onClick={() => onToggle(field)}
+      className={cn(
+        "flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide transition-colors",
+        isActive ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+      )}
+    >
+      {label}
+      <ArrowUpDown size={9} className={cn(isActive ? "opacity-100" : "opacity-40")} />
+      {isActive && <span className="text-[8px]">{dir === "asc" ? "↑" : "↓"}</span>}
+    </button>
   );
 }
