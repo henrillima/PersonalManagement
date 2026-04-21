@@ -18,6 +18,7 @@ import ListaCompras from "@/pages/ListaCompras";
 import Rotina from "@/pages/Rotina";
 import Estudos from "@/pages/Estudos";
 import Metas from "@/pages/Metas";
+import Foco from "@/pages/Foco";
 
 function AuthGuard() {
   const token = localStorage.getItem("token");
@@ -52,6 +53,7 @@ export default function App() {
             <Route path="lista-compras" element={<ListaCompras />} />
             <Route path="estudos" element={<Estudos />} />
             <Route path="metas" element={<Metas />} />
+            <Route path="foco" element={<Foco />} />
           </Route>
         </Route>
       </Routes>

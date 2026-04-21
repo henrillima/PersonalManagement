@@ -19,6 +19,7 @@ import {
   ChevronDown,
   BookOpen,
   Trophy,
+  ListOrdered,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -104,6 +105,17 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
         >
           <CheckSquare size={16} />
           Tarefas
+        </NavLink>
+
+        <NavLink
+          to="/foco"
+          className={({ isActive }) =>
+            cn("flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+              isActive ? "bg-[#C8DA2D] text-[#0C1923]" : "text-white/60 hover:text-white hover:bg-white/8")
+          }
+        >
+          <ListOrdered size={16} />
+          Fila de Execução
         </NavLink>
 
         {/* Financeiro expandable */}
