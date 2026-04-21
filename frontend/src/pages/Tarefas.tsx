@@ -1,7 +1,7 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  DndContext, DragOverlay, closestCenter,
+  DndContext, DragOverlay, closestCenter, pointerWithin,
   PointerSensor, useSensor, useSensors, useDroppable,
   type DragStartEvent, type DragOverEvent, type DragEndEvent,
 } from "@dnd-kit/core";
@@ -11,7 +11,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import {
   Plus, Trash2, GripVertical, Clock, Archive, RotateCcw,
-  Settings, ChevronDown, ChevronLeft, ChevronRight, Pencil, Check, X,
+  Settings, ChevronDown, ChevronLeft, ChevronRight, Pencil, Check, X, ListOrdered,
 } from "lucide-react";
 import { apiFetch, fmtDate } from "@/lib/api";
 import type { Tarefa, Frente, TarefaStatus, Prioridade, CategoriaItem, TarefaRecorrenteOcorrencia } from "@/types";
@@ -41,6 +41,18 @@ const COLUMNS: { id: TarefaStatus; label: string; bg: string }[] = [
   { id: "done",        label: "Concluído",    bg: "bg-green-50 dark:bg-green-950/30" },
   { id: "blocked",     label: "Bloqueado",    bg: "bg-red-50 dark:bg-red-950/30"    },
 ];
+
+const COLUMN_IDS = new Set(COLUMNS.map(c => c.id as string));
+
+const FILA_KEY = "fila_execucao_v1";
+function addTaskToFila(tarefaId: string, titulo: string, frenteCor: string | null, frenteNome: string | null) {
+  try {
+    const existing: Array<{ tarefaId: string }> = JSON.parse(localStorage.getItem(FILA_KEY) ?? "[]");
+    if (existing.some(f => f.tarefaId === tarefaId)) return;
+    const item = { id: crypto.randomUUID(), tarefaId, titulo, frenteCor, frenteNome, tempoMin: 25 };
+    localStorage.setItem(FILA_KEY, JSON.stringify([...existing, item]));
+  } catch { /* ignore */ }
+}
 
 const PRIORIDADES: { value: Prioridade; label: string; cor: string }[] = [
   { value: "alta",  label: "Alta",  cor: "#f87171" },
@@ -121,6 +133,19 @@ export default function Tarefas() {
   const [localOcorrencias, setLocalOcorrencias] = useState<TarefaRecorrenteOcorrencia[]>([]);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+
+  const customCollision = useCallback(
+    (args: Parameters<typeof closestCenter>[0]) => {
+      const activeStatus = activeTask?.status ?? activeOcorrencia?.status;
+      const pointerHits = pointerWithin(args);
+      const colHit = pointerHits.find(c => COLUMN_IDS.has(c.id as string));
+      if (colHit && activeStatus && (colHit.id as string) !== activeStatus) {
+        return [colHit];
+      }
+      return closestCenter(args);
+    },
+    [activeTask, activeOcorrencia],
+  );
 
   // ── Queries ────────────────────────────────────────────────────────────────
   const { data: categorias = [], isLoading: lC } = useQuery<CategoriaItem[]>({
@@ -292,7 +317,7 @@ export default function Tarefas() {
     return localOcorrencias.filter(oc =>
       (catTab === "todas" || oc.categoria === catTab) &&
       (priorFilter === "all" || oc.prioridade === priorFilter) &&
-      oc.status === s
+      (oc.status ?? "todo") === s
     );
   }
 
@@ -570,7 +595,7 @@ export default function Tarefas() {
           ) : (
             <DndContext
               sensors={sensors}
-              collisionDetection={closestCenter}
+              collisionDetection={customCollision}
               onDragStart={handleDragStart}
               onDragOver={handleDragOver}
               onDragEnd={handleDragEnd}
@@ -1070,6 +1095,12 @@ function CardContent({ tarefa, overlay, overdue, showCategoria, dragListeners, o
                 ))}
               </div>
               <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button
+                  onClick={e => { e.stopPropagation(); addTaskToFila(tarefa.id, tarefa.titulo, tarefa.frente_cor, tarefa.frente_nome); }}
+                  title="Adicionar à Fila de Execução"
+                  className="p-1 rounded text-muted-foreground hover:text-[#C8DA2D] transition-colors">
+                  <ListOrdered size={11} />
+                </button>
                 <button onClick={onEngage} title="Engavetar" className="p-1 rounded text-muted-foreground hover:text-amber-400 transition-colors"><Clock size={11} /></button>
                 <button onClick={onArchive} title="Arquivar" className="p-1 rounded text-muted-foreground hover:text-blue-400 transition-colors"><Archive size={11} /></button>
                 <button onClick={onDelete} title="Excluir" className="p-1 rounded text-muted-foreground hover:text-red-500 transition-colors"><Trash2 size={11} /></button>
@@ -1163,13 +1194,21 @@ function RecorrenteCardContent({ oc, showCategoria, overlay, dragListeners, onSt
             📅 {new Date(oc.data_alvo + "T00:00:00").toLocaleDateString("pt-BR")}
           </p>
           {!overlay && onStatus && (
-            <div className="flex gap-1 flex-wrap mt-2" onClick={e => e.stopPropagation()}>
-              {(REC_STATUS_ACTIONS[oc.status] ?? []).map(({ label, next }) => (
-                <button key={next} onClick={() => onStatus(next)}
-                  className="text-[10px] px-2 py-0.5 rounded-full border border-border hover:border-[#C8DA2D] hover:bg-[#C8DA2D]/10 transition-colors">
-                  {label}
-                </button>
-              ))}
+            <div className="flex items-center justify-between mt-2" onClick={e => e.stopPropagation()}>
+              <div className="flex gap-1 flex-wrap">
+                {(REC_STATUS_ACTIONS[oc.status ?? "todo"] ?? []).map(({ label, next }) => (
+                  <button key={next} onClick={() => onStatus(next)}
+                    className="text-[10px] px-2 py-0.5 rounded-full border border-border hover:border-[#C8DA2D] hover:bg-[#C8DA2D]/10 transition-colors">
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={e => { e.stopPropagation(); addTaskToFila(oc.id, oc.titulo, oc.frente_cor, oc.frente_nome); }}
+                title="Adicionar à Fila de Execução"
+                className="p-1 rounded text-muted-foreground hover:text-[#C8DA2D] transition-colors opacity-0 group-hover:opacity-100 shrink-0">
+                <ListOrdered size={11} />
+              </button>
             </div>
           )}
         </div>
