@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   DndContext,
@@ -15,7 +15,7 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical, Plus, X, Check, Clock, ListOrdered, Play, ArrowUpDown, CalendarClock } from "lucide-react";
+import { GripVertical, Plus, X, Check, Clock, ListOrdered, Play, Pause, RotateCcw, ArrowUpDown, CalendarClock } from "lucide-react";
 import { apiFetch, fmtDate } from "@/lib/api";
 import type { Tarefa } from "@/types";
 import { Button } from "@/components/ui/button";
@@ -25,6 +25,17 @@ import { cn } from "@/lib/utils";
 
 type SortField = "titulo" | "categoria" | "data_limite" | "prioridade";
 type SortDir = "asc" | "desc";
+
+// ── Timer ──────────────────────────────────────────────────────────────────────
+
+interface TimerState { elapsed: number; running: boolean; maxSec: number; }
+
+function fmtTimer(elapsed: number, maxSec: number): string {
+  const remaining = Math.max(0, maxSec - elapsed);
+  const m = Math.floor(remaining / 60);
+  const s = remaining % 60;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
 
 // ── Types & localStorage ───────────────────────────────────────────────────────
 
@@ -56,6 +67,52 @@ export default function Foco() {
   const [fila, setFila] = useState<FilaItem[]>(loadFila);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const [timers, setTimers] = useState<Record<string, TimerState>>({});
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    intervalRef.current = setInterval(() => {
+      setTimers(prev => {
+        if (!Object.values(prev).some(t => t.running)) return prev;
+        const next = { ...prev };
+        let changed = false;
+        for (const id of Object.keys(next)) {
+          const t = next[id];
+          if (t.running) {
+            const newElapsed = t.elapsed + 1;
+            const done = newElapsed >= t.maxSec;
+            next[id] = { ...t, elapsed: newElapsed, running: !done };
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+    }, 1000);
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+  }, []);
+
+  function toggleTimer(item: FilaItem) {
+    const maxSec = item.tempoMin * 60;
+    setTimers(prev => {
+      const cur = prev[item.id];
+      const isDone = cur && cur.elapsed >= cur.maxSec;
+      if (isDone) {
+        return { ...Object.fromEntries(Object.entries(prev).map(([k, v]) => [k, { ...v, running: false }])),
+          [item.id]: { elapsed: 0, running: true, maxSec } };
+      }
+      if (!cur?.running) {
+        const next: typeof prev = {};
+        for (const [k, v] of Object.entries(prev)) next[k] = { ...v, running: false };
+        next[item.id] = { elapsed: cur?.elapsed ?? 0, running: true, maxSec };
+        return next;
+      }
+      return { ...prev, [item.id]: { ...cur, running: false } };
+    });
+  }
+
+  function resetTimer(id: string) {
+    setTimers(prev => ({ ...prev, [id]: { elapsed: 0, running: false, maxSec: prev[id]?.maxSec ?? 0 } }));
+  }
   const [filterCat, setFilterCat] = useState("all");
   const [sortField, setSortField] = useState<SortField>("titulo");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
@@ -89,6 +146,7 @@ export default function Foco() {
 
   function removeFromFila(id: string) {
     updateFila(fila.filter(f => f.id !== id));
+    setTimers(prev => { const next = { ...prev }; delete next[id]; return next; });
   }
 
   function updateTempo(id: string, min: number) {
@@ -192,9 +250,12 @@ export default function Foco() {
                   key={item.id}
                   item={item}
                   index={index}
+                  timer={timers[item.id]}
                   onRemove={() => removeFromFila(item.id)}
                   onComplete={() => removeFromFila(item.id)}
                   onTempoChange={min => updateTempo(item.id, min)}
+                  onTimerToggle={() => toggleTimer(item)}
+                  onTimerReset={() => resetTimer(item.id)}
                 />
               ))}
             </div>
@@ -313,12 +374,15 @@ export default function Foco() {
 
 // ── Sortable item ──────────────────────────────────────────────────────────────
 
-function SortableFilaItem({ item, index, onRemove, onComplete, onTempoChange }: {
+function SortableFilaItem({ item, index, timer, onRemove, onComplete, onTempoChange, onTimerToggle, onTimerReset }: {
   item: FilaItem;
   index: number;
+  timer?: TimerState;
   onRemove: () => void;
   onComplete: () => void;
   onTempoChange: (min: number) => void;
+  onTimerToggle: () => void;
+  onTimerReset: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: item.id });
@@ -379,6 +443,35 @@ function SortableFilaItem({ item, index, onRemove, onComplete, onTempoChange }: 
         />
         <span className="text-[10px] text-muted-foreground">min</span>
       </div>
+
+      {/* Timer */}
+      {(() => {
+        const maxSec = item.tempoMin * 60;
+        const elapsed = timer?.elapsed ?? 0;
+        const running = timer?.running ?? false;
+        const isDone  = elapsed > 0 && elapsed >= maxSec;
+        return (
+          <div className="flex items-center gap-0.5 shrink-0">
+            <button onClick={onTimerToggle} title={running ? "Pausar" : "Iniciar timer"}
+              className={cn("p-1.5 rounded-lg transition-colors",
+                running ? "text-[#C8DA2D] hover:text-foreground" : "text-muted-foreground hover:text-[#C8DA2D]"
+              )}>
+              {running ? <Pause size={13} /> : <Play size={13} />}
+            </button>
+            <span className={cn("text-xs font-mono min-w-[38px] text-center tabular-nums",
+              isDone ? "text-green-500 font-bold" : running ? "text-[#C8DA2D]" : "text-muted-foreground"
+            )}>
+              {isDone ? "00:00" : fmtTimer(elapsed, maxSec)}
+            </span>
+            {elapsed > 0 && (
+              <button onClick={onTimerReset} title="Reiniciar"
+                className="p-1 text-muted-foreground/50 hover:text-muted-foreground transition-colors">
+                <RotateCcw size={10} />
+              </button>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Complete */}
       <button

@@ -307,6 +307,7 @@ export interface TarefaRecorrenteOcorrencia {
   recorrente_id: string;
   data_alvo: string;
   concluida: boolean;
+  status: TarefaStatus;
   titulo: string;
   descricao: string | null;
   categoria: string;

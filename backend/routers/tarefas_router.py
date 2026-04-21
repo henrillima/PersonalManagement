@@ -200,7 +200,8 @@ class TarefaRecorrenteUpdate(BaseModel):
     ativo: Optional[bool] = None
 
 class OcorrenciaUpdate(BaseModel):
-    concluida: bool
+    concluida: Optional[bool] = None
+    status: Optional[str] = None
 
 # Static route MUST be defined before the parameterized /{rec_id} routes
 @router.get("/tarefas-recorrentes/ocorrencias")
@@ -292,10 +293,19 @@ def create_tarefa_recorrente(body: TarefaRecorrenteCreate, _: str = Depends(veri
 
 @router.patch("/tarefas-recorrentes/ocorrencias/{ocorrencia_id}")
 def toggle_ocorrencia(ocorrencia_id: str, body: OcorrenciaUpdate, _: str = Depends(verify_token)):
+    update_data: dict = {}
+    if body.status is not None:
+        update_data["status"] = body.status
+        update_data["concluida"] = body.status == "done"
+    elif body.concluida is not None:
+        update_data["concluida"] = body.concluida
+        update_data["status"] = "done" if body.concluida else "todo"
+    if not update_data:
+        raise HTTPException(400, "Nenhum campo")
     row = (
         get_db()
         .table("tarefas_recorrentes_ocorrencias")
-        .update({"concluida": body.concluida})
+        .update(update_data)
         .eq("id", ocorrencia_id)
         .execute()
         .data

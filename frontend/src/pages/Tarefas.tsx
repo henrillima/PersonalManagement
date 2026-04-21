@@ -117,6 +117,8 @@ export default function Tarefas() {
   const [recOpenCreate, setRecOpenCreate] = useState(false);
   const [mesOcorrencias, setMesOcorrencias] = useState(MES_ATUAL);
   const [dateFilter, setDateFilter] = useState<"all" | "week" | "15d" | "month">("all");
+  const [activeOcorrencia, setActiveOcorrencia] = useState<TarefaRecorrenteOcorrencia | null>(null);
+  const [localOcorrencias, setLocalOcorrencias] = useState<TarefaRecorrenteOcorrencia[]>([]);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
@@ -157,6 +159,7 @@ export default function Tarefas() {
   }, [categorias]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { setLocalTasks(tarefas); }, [tarefas]);
+  useEffect(() => { setLocalOcorrencias(ocorrencias); }, [ocorrencias]);
 
   useEffect(() => {
     setFrenteFilter("all");
@@ -199,8 +202,8 @@ export default function Tarefas() {
   });
 
   const toggleOcorrencia = useMutation({
-    mutationFn: ({ id, concluida }: { id: string; concluida: boolean }) =>
-      apiFetch(`/api/v1/tarefas-recorrentes/ocorrencias/${id}`, { method: "PATCH", body: JSON.stringify({ concluida }) }),
+    mutationFn: ({ id, status }: { id: string; status: TarefaStatus }) =>
+      apiFetch(`/api/v1/tarefas-recorrentes/ocorrencias/${id}`, { method: "PATCH", body: JSON.stringify({ status }) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["ocorrencias-mes", mesOcorrencias] }),
   });
 
@@ -284,14 +287,47 @@ export default function Tarefas() {
       return (a.ordem ?? 0) - (b.ordem ?? 0);
     });
 
+  function getColOcorrencias(s: TarefaStatus) {
+    if (catTab === "arquivo" || catTab === "recorrentes") return [];
+    return localOcorrencias.filter(oc =>
+      (catTab === "todas" || oc.categoria === catTab) &&
+      (priorFilter === "all" || oc.prioridade === priorFilter) &&
+      oc.status === s
+    );
+  }
+
   // ── DnD handlers ───────────────────────────────────────────────────────────
   function handleDragStart({ active }: DragStartEvent) {
-    setActiveTask(localTasks.find(t => t.id === active.id) ?? null);
+    const id = active.id as string;
+    if (id.startsWith("rec-")) {
+      setActiveOcorrencia(localOcorrencias.find(oc => oc.id === id.slice(4)) ?? null);
+      setActiveTask(null);
+    } else {
+      setActiveTask(localTasks.find(t => t.id === id) ?? null);
+      setActiveOcorrencia(null);
+    }
   }
 
   function handleDragOver({ active, over }: DragOverEvent) {
     if (!over || active.id === over.id) return;
-    const drag = localTasks.find(t => t.id === active.id);
+    const id = active.id as string;
+
+    if (id.startsWith("rec-")) {
+      const ocId = id.slice(4);
+      const oc = localOcorrencias.find(o => o.id === ocId);
+      if (!oc) return;
+      const overId = over.id as string;
+      const isCol = COLUMNS.some(c => c.id === overId);
+      const overTask = !isCol ? localTasks.find(t => t.id === overId) : null;
+      const overOc = !isCol && !overTask ? localOcorrencias.find(o => `rec-${o.id}` === overId) : null;
+      const newStatus = (isCol ? overId : overTask?.status ?? overOc?.status) as TarefaStatus | undefined;
+      if (newStatus && oc.status !== newStatus) {
+        setLocalOcorrencias(prev => prev.map(o => o.id === ocId ? { ...o, status: newStatus } : o));
+      }
+      return;
+    }
+
+    const drag = localTasks.find(t => t.id === id);
     if (!drag) return;
     const isCol = COLUMNS.some(c => c.id === over.id);
     const overCard = !isCol ? localTasks.find(t => t.id === over.id) : null;
@@ -302,6 +338,21 @@ export default function Tarefas() {
   }
 
   function handleDragEnd({ active, over }: DragEndEvent) {
+    const id = active.id as string;
+
+    if (id.startsWith("rec-")) {
+      setActiveOcorrencia(null);
+      if (!over) { setLocalOcorrencias(ocorrencias); return; }
+      const ocId = id.slice(4);
+      const oc   = localOcorrencias.find(o => o.id === ocId);
+      const orig = ocorrencias.find(o => o.id === ocId);
+      if (!oc || !orig) { setLocalOcorrencias(ocorrencias); return; }
+      if (oc.status !== orig.status) {
+        toggleOcorrencia.mutate({ id: ocId, status: oc.status });
+      }
+      return;
+    }
+
     setActiveTask(null);
     if (!over || active.id === over.id) { setLocalTasks(tarefas); return; }
 
@@ -526,16 +577,18 @@ export default function Tarefas() {
             >
               <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
                 {COLUMNS.map(col => {
-                  const items = getColVisible(col.id);
+                  const items   = getColVisible(col.id);
+                  const recItems = getColOcorrencias(col.id);
+                  const allIds  = [...items.map(t => t.id), ...recItems.map(oc => `rec-${oc.id}`)];
                   return (
                     <DroppableColumn key={col.id} id={col.id} className="flex flex-col gap-2 min-h-[55vh] rounded-lg p-1">
                       <div className={cn("flex items-center justify-between px-3 py-2 rounded-lg shrink-0", col.bg)}>
                         <span className="text-sm font-semibold">{col.label}</span>
                         <span className="text-xs text-muted-foreground bg-background/60 px-1.5 py-0.5 rounded-full font-medium">
-                          {getColAll(col.id).length}
+                          {getColAll(col.id).length + recItems.length}
                         </span>
                       </div>
-                      <SortableContext items={items.map(t => t.id)} strategy={verticalListSortingStrategy}>
+                      <SortableContext items={allIds} strategy={verticalListSortingStrategy}>
                         {items.map(t => (
                           <SortableCard
                             key={t.id} tarefa={t}
@@ -549,18 +602,17 @@ export default function Tarefas() {
                             onArchive={() => arquivar(t)}
                           />
                         ))}
-                      </SortableContext>
-                      {(col.id === "todo" || col.id === "done") && visibleOcorrencias
-                        .filter(oc => col.id === "todo" ? !oc.concluida : oc.concluida)
-                        .map(oc => (
-                          <RecorrenteCard
+                        {recItems.map(oc => (
+                          <SortableRecorrenteCard
                             key={`rec-${oc.id}`}
                             oc={oc}
+                            isDragging={activeOcorrencia?.id === oc.id}
                             showCategoria={catTab === "todas"}
-                            onToggle={() => toggleOcorrencia.mutate({ id: oc.id, concluida: !oc.concluida })}
+                            onStatus={status => toggleOcorrencia.mutate({ id: oc.id, status })}
                           />
                         ))}
-                      {items.length === 0 && activeTask && (
+                      </SortableContext>
+                      {items.length === 0 && recItems.length === 0 && (activeTask || activeOcorrencia) && (
                         <div className="flex items-center justify-center h-14 rounded-lg border-2 border-dashed border-[#C8DA2D]/30 text-xs text-muted-foreground">
                           Soltar aqui
                         </div>
@@ -572,6 +624,7 @@ export default function Tarefas() {
 
               <DragOverlay dropAnimation={null}>
                 {activeTask && <CardContent tarefa={activeTask} overlay showCategoria={catTab === "todas"} />}
+                {activeOcorrencia && <RecorrenteCardContent oc={activeOcorrencia} showCategoria={catTab === "todas"} overlay />}
               </DragOverlay>
             </DndContext>
           )}
@@ -1049,23 +1102,39 @@ function SortableCard({ tarefa, isDragging, ...rest }: SortableCardProps) {
   );
 }
 
-// ── RecorrenteCard ─────────────────────────────────────────────────────────────
+// ── RecorrenteCardContent ──────────────────────────────────────────────────────
 
-function RecorrenteCard({ oc, showCategoria, onToggle }: {
+const REC_STATUS_ACTIONS: Record<string, { label: string; next: TarefaStatus }[]> = {
+  todo:        [{ label: "Iniciar",  next: "in_progress" }, { label: "Bloquear", next: "blocked" }],
+  in_progress: [{ label: "Concluir", next: "done"        }, { label: "Bloquear", next: "blocked" }],
+  done:        [{ label: "Reabrir",  next: "todo"        }],
+  blocked:     [{ label: "Retomar",  next: "in_progress" }, { label: "Concluir", next: "done"   }],
+};
+
+function RecorrenteCardContent({ oc, showCategoria, overlay, dragListeners, onStatus }: {
   oc: TarefaRecorrenteOcorrencia;
   showCategoria?: boolean;
-  onToggle: () => void;
+  overlay?: boolean;
+  dragListeners?: Record<string, unknown>;
+  onStatus?: (s: TarefaStatus) => void;
 }) {
   const prioridade = PRIORIDADES.find(p => p.value === oc.prioridade);
+  const isDone = oc.status === "done";
+
   return (
     <div className={cn(
-      "bg-card border border-dashed rounded-xl p-3 transition-all",
-      oc.concluida
-        ? "border-green-400/25 opacity-60"
-        : "border-indigo-400/30 hover:border-indigo-400/50",
+      "bg-card border border-dashed rounded-xl p-3 select-none transition-all",
+      isDone ? "border-green-400/25 opacity-60" : "border-indigo-400/30 hover:border-indigo-400/50",
+      overlay && "shadow-2xl rotate-1 opacity-90",
     )}>
       <div className="flex items-start gap-1.5">
-        <div className="w-3 shrink-0" />
+        <div
+          {...(!overlay ? dragListeners : {})}
+          onClick={e => e.stopPropagation()}
+          className={cn("mt-0.5 shrink-0 touch-none", !overlay && "cursor-grab active:cursor-grabbing")}
+        >
+          <GripVertical size={12} className="text-muted-foreground/40" />
+        </div>
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap gap-1 mb-1.5">
             <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-indigo-400/10 text-indigo-400">🔁</span>
@@ -1087,26 +1156,51 @@ function RecorrenteCard({ oc, showCategoria, onToggle }: {
               </span>
             )}
           </div>
-          <p className={cn("text-sm font-medium leading-snug", oc.concluida && "line-through text-muted-foreground")}>
+          <p className={cn("text-sm font-medium leading-snug", isDone && "line-through text-muted-foreground")}>
             {oc.titulo}
           </p>
           <p className="text-[10px] text-muted-foreground mt-1">
             📅 {new Date(oc.data_alvo + "T00:00:00").toLocaleDateString("pt-BR")}
           </p>
-        </div>
-        <button
-          onClick={onToggle}
-          className={cn(
-            "shrink-0 flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full transition-colors mt-0.5",
-            oc.concluida
-              ? "bg-green-400/15 text-green-400 hover:bg-red-400/15 hover:text-red-400"
-              : "bg-muted text-muted-foreground hover:bg-green-400/15 hover:text-green-400"
+          {!overlay && onStatus && (
+            <div className="flex gap-1 flex-wrap mt-2" onClick={e => e.stopPropagation()}>
+              {(REC_STATUS_ACTIONS[oc.status] ?? []).map(({ label, next }) => (
+                <button key={next} onClick={() => onStatus(next)}
+                  className="text-[10px] px-2 py-0.5 rounded-full border border-border hover:border-[#C8DA2D] hover:bg-[#C8DA2D]/10 transition-colors">
+                  {label}
+                </button>
+              ))}
+            </div>
           )}
-        >
-          <Check size={9} />
-          {oc.concluida ? "Desfazer" : "Feita"}
-        </button>
+        </div>
       </div>
+    </div>
+  );
+}
+
+// ── SortableRecorrenteCard ─────────────────────────────────────────────────────
+
+function SortableRecorrenteCard({ oc, isDragging, showCategoria, onStatus }: {
+  oc: TarefaRecorrenteOcorrencia;
+  isDragging: boolean;
+  showCategoria?: boolean;
+  onStatus: (s: TarefaStatus) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition } =
+    useSortable({ id: `rec-${oc.id}` });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      {...attributes}
+      className={cn(isDragging && "opacity-30")}
+    >
+      <RecorrenteCardContent
+        oc={oc}
+        showCategoria={showCategoria}
+        dragListeners={listeners as Record<string, unknown>}
+        onStatus={onStatus}
+      />
     </div>
   );
 }
