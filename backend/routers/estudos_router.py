@@ -1,5 +1,5 @@
 from typing import Optional
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from auth import verify_token
 from database import get_db
@@ -124,3 +124,55 @@ def update_item_estudo(item_id: str, body: ItemEstudoUpdate, _: str = Depends(ve
 @router.delete("/estudos/itens/{item_id}", status_code=204)
 def delete_item_estudo(item_id: str, _: str = Depends(verify_token)):
     get_db().table("itens_estudo").delete().eq("id", item_id).execute()
+
+# ── Plano de Estudos ────────────────────────────────────────────────────────────
+
+class PlanoItemCreate(BaseModel):
+    item_id: str
+    titulo: str
+    tipo: Optional[str] = None
+    frente_nome: Optional[str] = None
+    cat_emoji: Optional[str] = None
+    cat_nome: Optional[str] = None
+
+class PlanoReorderBody(BaseModel):
+    ids: list[str]
+
+@router.get("/estudos/plano")
+def get_plano(user: str = Depends(verify_token)):
+    return get_db().table("plano_estudos").select("*").eq("user_id", user).order("ordem").execute().data
+
+@router.post("/estudos/plano", status_code=201)
+def add_to_plano(body: PlanoItemCreate, user: str = Depends(verify_token)):
+    db = get_db()
+    existing = (
+        db.table("plano_estudos").select("ordem")
+        .eq("user_id", user).order("ordem", desc=True).limit(1).execute().data
+    )
+    ordem = (existing[0]["ordem"] + 1) if existing else 0
+    try:
+        res = db.table("plano_estudos").insert({
+            "user_id": user,
+            "item_id": body.item_id,
+            "titulo": body.titulo,
+            "tipo": body.tipo,
+            "frente_nome": body.frente_nome,
+            "cat_emoji": body.cat_emoji,
+            "cat_nome": body.cat_nome,
+            "ordem": ordem,
+        }).execute()
+        return res.data[0]
+    except Exception:
+        raise HTTPException(409, "Item já está no plano")
+
+# NOTE: static path /plano/reorder must come before /{id}
+@router.post("/estudos/plano/reorder")
+def reorder_plano(body: PlanoReorderBody, user: str = Depends(verify_token)):
+    db = get_db()
+    for i, item_id in enumerate(body.ids):
+        db.table("plano_estudos").update({"ordem": i}).eq("id", item_id).eq("user_id", user).execute()
+    return {"ok": True}
+
+@router.delete("/estudos/plano/{plan_id}", status_code=204)
+def remove_from_plano(plan_id: str, user: str = Depends(verify_token)):
+    get_db().table("plano_estudos").delete().eq("id", plan_id).eq("user_id", user).execute()
