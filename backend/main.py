@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from routers import auth_router, home_router, tarefas_router, financeiro_router, saude_router
 from routers import lista_compras_router, categorias_router, agenda_router
 from routers import pessoas_router, corretoras_router, estudos_router, metas_router, fila_router
+from routers import subtarefas_router
 
 app = FastAPI(title="Life OS API", version="1.0.0")
 
@@ -38,6 +39,7 @@ app.include_router(corretoras_router.router,   prefix="/api/v1")
 app.include_router(estudos_router.router,      prefix="/api/v1")
 app.include_router(metas_router.router,        prefix="/api/v1")
 app.include_router(fila_router.router,         prefix="/api/v1")
+app.include_router(subtarefas_router.router,   prefix="/api/v1")
 
 
 @app.get("/api/v1/health")

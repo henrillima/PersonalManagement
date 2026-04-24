@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   DndContext, DragOverlay, closestCenter, pointerWithin,
@@ -14,7 +14,7 @@ import {
   Settings, ChevronDown, ChevronLeft, ChevronRight, Pencil, Check, X, ListOrdered,
 } from "lucide-react";
 import { apiFetch, fmtDate } from "@/lib/api";
-import type { Tarefa, Frente, TarefaStatus, Prioridade, CategoriaItem, TarefaRecorrenteOcorrencia } from "@/types";
+import type { Tarefa, Frente, TarefaStatus, Prioridade, CategoriaItem, TarefaRecorrenteOcorrencia, Subtarefa } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -227,6 +227,39 @@ export default function Tarefas() {
     mutationFn: ({ id, status }: { id: string; status: TarefaStatus }) =>
       apiFetch(`/api/v1/tarefas-recorrentes/ocorrencias/${id}`, { method: "PATCH", body: JSON.stringify({ status }) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["ocorrencias-mes", mesOcorrencias] }),
+  });
+
+  const { data: subtarefas = [] } = useQuery<Subtarefa[]>({
+    queryKey: ["subtarefas"],
+    queryFn: () => apiFetch("/api/v1/subtarefas"),
+  });
+
+  const createSubtarefa = useMutation({
+    mutationFn: (d: { tarefa_id: string; titulo: string }) =>
+      apiFetch("/api/v1/subtarefas", { method: "POST", body: JSON.stringify(d) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["subtarefas"] }),
+  });
+
+  const toggleSubtarefa = useMutation({
+    mutationFn: ({ id, concluida }: { id: string; concluida: boolean }) =>
+      apiFetch(`/api/v1/subtarefas/${id}`, { method: "PATCH", body: JSON.stringify({ concluida }) }),
+    onMutate: async ({ id, concluida }) => {
+      await qc.cancelQueries({ queryKey: ["subtarefas"] });
+      const prev = qc.getQueryData<Subtarefa[]>(["subtarefas"]);
+      qc.setQueryData<Subtarefa[]>(["subtarefas"], old =>
+        (old ?? []).map(s => s.id === id ? { ...s, concluida } : s)
+      );
+      return { prev };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(["subtarefas"], ctx.prev);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ["subtarefas"] }),
+  });
+
+  const deleteSubtarefa = useMutation({
+    mutationFn: (id: string) => apiFetch(`/api/v1/subtarefas/${id}`, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["subtarefas"] }),
   });
 
   const createProjeto = useMutation({
@@ -622,6 +655,10 @@ export default function Tarefas() {
                             onStatus={next => updateTarefa.mutate({ id: t.id, d: { status: next } })}
                             onEngage={() => engavetar(t)}
                             onArchive={() => arquivar(t)}
+                            subtarefas={subtarefas.filter(s => s.tarefa_id === t.id)}
+                            onToggleSubtarefa={(id, concluida) => toggleSubtarefa.mutate({ id, concluida })}
+                            onAddSubtarefa={titulo => createSubtarefa.mutate({ tarefa_id: t.id, titulo })}
+                            onDeleteSubtarefa={id => deleteSubtarefa.mutate(id)}
                           />
                         ))}
                         {recItems.map(oc => (
@@ -1022,10 +1059,31 @@ interface CardContentProps {
   onStatus?: (next: TarefaStatus) => void;
   onEngage?: () => void;
   onArchive?: () => void;
+  subtarefas?: Subtarefa[];
+  onToggleSubtarefa?: (id: string, concluida: boolean) => void;
+  onAddSubtarefa?: (titulo: string) => void;
+  onDeleteSubtarefa?: (id: string) => void;
 }
 
-function CardContent({ tarefa, overlay, overdue, showCategoria, dragListeners, onEdit, onDelete, onStatus, onEngage, onArchive }: CardContentProps) {
+function CardContent({ tarefa, overlay, overdue, showCategoria, dragListeners, onEdit, onDelete, onStatus, onEngage, onArchive, subtarefas = [], onToggleSubtarefa, onAddSubtarefa, onDeleteSubtarefa }: CardContentProps) {
   const prioridade = PRIORIDADES.find(p => p.value === tarefa.prioridade);
+  const [subExpanded, setSubExpanded] = useState(false);
+  const [newSubInput, setNewSubInput] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const total     = subtarefas.length;
+  const concluidas = subtarefas.filter(s => s.concluida).length;
+
+  useEffect(() => {
+    if (subExpanded && inputRef.current) inputRef.current.focus();
+  }, [subExpanded]);
+
+  function handleAddSub() {
+    const titulo = newSubInput.trim();
+    if (!titulo) return;
+    onAddSubtarefa?.(titulo);
+    setNewSubInput("");
+  }
 
   return (
     <div
@@ -1082,27 +1140,111 @@ function CardContent({ tarefa, overlay, overdue, showCategoria, dragListeners, o
           )}
 
           {!overlay && (
-            <div className="flex items-center justify-between mt-2" onClick={e => e.stopPropagation()}>
-              <div className="flex gap-1 flex-wrap">
-                {STATUS_ACTIONS[tarefa.status]?.map(({ label, next }) => (
-                  <button key={next} onClick={() => onStatus?.(next)}
-                    className="text-[10px] px-2 py-0.5 rounded-full border border-border hover:border-[#C8DA2D] hover:bg-[#C8DA2D]/10 transition-colors">
-                    {label}
+            <>
+              {/* Subtask section */}
+              <div className="mt-2" onClick={e => e.stopPropagation()}>
+                {total > 0 ? (
+                  <button
+                    onClick={() => setSubExpanded(v => !v)}
+                    className="flex items-center gap-1.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors w-full"
+                  >
+                    <div className="flex gap-[3px] items-center">
+                      {subtarefas.slice(0, 8).map(s => (
+                        <div key={s.id} className={cn("w-[5px] h-[5px] rounded-full transition-colors",
+                          s.concluida ? "bg-[#C8DA2D]" : "bg-muted-foreground/25")} />
+                      ))}
+                      {total > 8 && <span className="ml-0.5">…</span>}
+                    </div>
+                    <span>{concluidas}/{total} etapas</span>
+                    {subExpanded
+                      ? <ChevronDown size={9} className="ml-auto" />
+                      : <ChevronRight size={9} className="ml-auto" />}
                   </button>
-                ))}
+                ) : (
+                  <button
+                    onClick={() => setSubExpanded(v => !v)}
+                    className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-[#C8DA2D] transition-colors opacity-0 group-hover:opacity-100"
+                  >
+                    <Plus size={9} /> Subtarefas
+                  </button>
+                )}
+
+                {subExpanded && (
+                  <div className="mt-1.5 space-y-1">
+                    {subtarefas.map(s => (
+                      <div key={s.id} className="flex items-center gap-1.5 group/sub">
+                        <button
+                          onClick={() => onToggleSubtarefa?.(s.id, !s.concluida)}
+                          className={cn(
+                            "w-3.5 h-3.5 rounded border-[1.5px] shrink-0 flex items-center justify-center transition-all",
+                            s.concluida
+                              ? "bg-[#C8DA2D] border-[#C8DA2D]"
+                              : "border-muted-foreground/40 hover:border-[#C8DA2D]"
+                          )}
+                        >
+                          {s.concluida && <Check size={8} className="text-[#0C1923]" strokeWidth={3} />}
+                        </button>
+                        <span className={cn(
+                          "text-xs flex-1 leading-tight",
+                          s.concluida && "line-through text-muted-foreground"
+                        )}>
+                          {s.titulo}
+                        </span>
+                        <button
+                          onClick={() => onDeleteSubtarefa?.(s.id)}
+                          className="p-0.5 text-muted-foreground/30 hover:text-red-500 transition-colors opacity-0 group-hover/sub:opacity-100 shrink-0"
+                        >
+                          <X size={9} />
+                        </button>
+                      </div>
+                    ))}
+                    {/* Inline add input */}
+                    <div className="flex items-center gap-1.5 pt-0.5">
+                      <div className="w-3.5 h-3.5 rounded border-[1.5px] border-muted-foreground/20 shrink-0" />
+                      <input
+                        ref={inputRef}
+                        value={newSubInput}
+                        onChange={e => setNewSubInput(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === "Enter") handleAddSub();
+                          if (e.key === "Escape") { setNewSubInput(""); if (total === 0) setSubExpanded(false); }
+                        }}
+                        placeholder="Nova etapa… (Enter)"
+                        className="text-xs flex-1 bg-transparent border-none outline-none placeholder:text-muted-foreground/30"
+                      />
+                      {newSubInput.trim() && (
+                        <button onClick={handleAddSub} className="shrink-0 text-[#C8DA2D]">
+                          <Check size={10} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
-              <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button
-                  onClick={e => { e.stopPropagation(); addTaskToFila(tarefa.id, tarefa.titulo, tarefa.frente_cor, tarefa.frente_nome); }}
-                  title="Adicionar à Fila de Execução"
-                  className="p-1 rounded text-muted-foreground hover:text-[#C8DA2D] transition-colors">
-                  <ListOrdered size={11} />
-                </button>
-                <button onClick={onEngage} title="Engavetar" className="p-1 rounded text-muted-foreground hover:text-amber-400 transition-colors"><Clock size={11} /></button>
-                <button onClick={onArchive} title="Arquivar" className="p-1 rounded text-muted-foreground hover:text-blue-400 transition-colors"><Archive size={11} /></button>
-                <button onClick={onDelete} title="Excluir" className="p-1 rounded text-muted-foreground hover:text-red-500 transition-colors"><Trash2 size={11} /></button>
+
+              {/* Action buttons */}
+              <div className="flex items-center justify-between mt-2" onClick={e => e.stopPropagation()}>
+                <div className="flex gap-1 flex-wrap">
+                  {STATUS_ACTIONS[tarefa.status]?.map(({ label, next }) => (
+                    <button key={next} onClick={() => onStatus?.(next)}
+                      className="text-[10px] px-2 py-0.5 rounded-full border border-border hover:border-[#C8DA2D] hover:bg-[#C8DA2D]/10 transition-colors">
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    onClick={e => { e.stopPropagation(); addTaskToFila(tarefa.id, tarefa.titulo, tarefa.frente_cor, tarefa.frente_nome); }}
+                    title="Adicionar à Fila de Execução"
+                    className="p-1 rounded text-muted-foreground hover:text-[#C8DA2D] transition-colors">
+                    <ListOrdered size={11} />
+                  </button>
+                  <button onClick={onEngage} title="Engavetar" className="p-1 rounded text-muted-foreground hover:text-amber-400 transition-colors"><Clock size={11} /></button>
+                  <button onClick={onArchive} title="Arquivar" className="p-1 rounded text-muted-foreground hover:text-blue-400 transition-colors"><Archive size={11} /></button>
+                  <button onClick={onDelete} title="Excluir" className="p-1 rounded text-muted-foreground hover:text-red-500 transition-colors"><Trash2 size={11} /></button>
+                </div>
               </div>
-            </div>
+            </>
           )}
         </div>
       </div>

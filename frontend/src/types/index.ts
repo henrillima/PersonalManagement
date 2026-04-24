@@ -283,6 +283,18 @@ export interface HomeResumo {
   proximas_despesas: DespesaResumo[];
 }
 
+// ── Subtarefas ────────────────────────────────────────────────────────────────
+
+export interface Subtarefa {
+  id: string;
+  tarefa_id: string;
+  user_id: string;
+  titulo: string;
+  concluida: boolean;
+  ordem: number;
+  criado_em: string;
+}
+
 // ── Tarefas Recorrentes ───────────────────────────────────────────────────────
 
 export interface TarefaRecorrente {
