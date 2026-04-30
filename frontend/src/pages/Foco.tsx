@@ -15,9 +15,12 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical, Plus, X, Check, Clock, ListOrdered, Play, Pause, RotateCcw, ArrowUpDown, CalendarClock } from "lucide-react";
+import {
+  GripVertical, Plus, X, Check, Clock, ListOrdered, Play, Pause, RotateCcw,
+  ArrowUpDown, CalendarClock, ChevronDown, ChevronRight,
+} from "lucide-react";
 import { apiFetch, fmtDate } from "@/lib/api";
-import type { Tarefa } from "@/types";
+import type { Tarefa, Subtarefa } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -119,6 +122,12 @@ export default function Foco() {
     staleTime: 60_000,
   });
 
+  const { data: subtarefas = [] } = useQuery<Subtarefa[]>({
+    queryKey: ["subtarefas"],
+    queryFn: () => apiFetch("/api/v1/subtarefas"),
+    staleTime: 30_000,
+  });
+
   // ── Mutations ───────────────────────────────────────────────────────────────
   const invalidateFila = () => qc.invalidateQueries({ queryKey: ["fila"] });
 
@@ -150,6 +159,29 @@ export default function Foco() {
       qc.invalidateQueries({ queryKey: ["tarefas"] });
       qc.invalidateQueries({ queryKey: ["tarefas-foco"] });
     },
+  });
+
+  const toggleSubtarefa = useMutation({
+    mutationFn: ({ id, concluida }: { id: string; concluida: boolean }) =>
+      apiFetch(`/api/v1/subtarefas/${id}`, { method: "PATCH", body: JSON.stringify({ concluida }) }),
+    onMutate: async ({ id, concluida }) => {
+      await qc.cancelQueries({ queryKey: ["subtarefas"] });
+      const prev = qc.getQueryData<Subtarefa[]>(["subtarefas"]);
+      qc.setQueryData<Subtarefa[]>(["subtarefas"], old =>
+        (old ?? []).map(s => s.id === id ? { ...s, concluida } : s)
+      );
+      return { prev };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(["subtarefas"], ctx.prev);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ["subtarefas"] }),
+  });
+
+  const createSubtarefa = useMutation({
+    mutationFn: (d: { tarefa_id: string; titulo: string }) =>
+      apiFetch("/api/v1/subtarefas", { method: "POST", body: JSON.stringify(d) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["subtarefas"] }),
   });
 
   // ── Actions ──────────────────────────────────────────────────────────────────
@@ -278,11 +310,14 @@ export default function Foco() {
                   item={item}
                   index={index}
                   timer={timers[item.id]}
+                  subtarefas={subtarefas.filter(s => s.tarefa_id === item.tarefa_id)}
                   onRemove={() => removeFromFila(item.id)}
                   onComplete={() => completeAndRemove(item)}
                   onTempoChange={min => updateTempo(item.id, min)}
                   onTimerToggle={() => toggleTimer(item)}
                   onTimerReset={() => resetTimer(item.id)}
+                  onToggleSubtarefa={(id, concluida) => toggleSubtarefa.mutate({ id, concluida })}
+                  onAddSubtarefa={titulo => createSubtarefa.mutate({ tarefa_id: item.tarefa_id, titulo })}
                 />
               ))}
             </div>
@@ -368,19 +403,25 @@ export default function Foco() {
 
 // ── SortableFilaItem ───────────────────────────────────────────────────────────
 
-function SortableFilaItem({ item, index, timer, onRemove, onComplete, onTempoChange, onTimerToggle, onTimerReset }: {
+function SortableFilaItem({ item, index, timer, subtarefas, onRemove, onComplete, onTempoChange, onTimerToggle, onTimerReset, onToggleSubtarefa, onAddSubtarefa }: {
   item: FilaItem;
   index: number;
   timer?: TimerState;
+  subtarefas: Subtarefa[];
   onRemove: () => void;
   onComplete: () => void;
   onTempoChange: (min: number) => void;
   onTimerToggle: () => void;
   onTimerReset: () => void;
+  onToggleSubtarefa: (id: string, concluida: boolean) => void;
+  onAddSubtarefa: (titulo: string) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: item.id });
   const [localTempo, setLocalTempo] = useState(item.tempo_min);
+  const [subExpanded, setSubExpanded] = useState(false);
+  const [newSubInput, setNewSubInput] = useState("");
+  const subInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { setLocalTempo(item.tempo_min); }, [item.tempo_min]);
 
@@ -391,73 +432,161 @@ function SortableFilaItem({ item, index, timer, onRemove, onComplete, onTempoCha
   const running = timer?.running ?? false;
   const isDone  = elapsed > 0 && elapsed >= maxSec;
 
+  const total = subtarefas.length;
+  const concluidas = subtarefas.filter(s => s.concluida).length;
+
+  function handleAddSub() {
+    const titulo = newSubInput.trim();
+    if (!titulo) return;
+    onAddSubtarefa(titulo);
+    setNewSubInput("");
+  }
+
+  useEffect(() => {
+    if (subExpanded && subInputRef.current) subInputRef.current.focus();
+  }, [subExpanded]);
+
   return (
     <div ref={setNodeRef} style={style}
-      className={cn("flex items-center gap-3 bg-card border rounded-xl px-4 py-3 group transition-shadow",
+      className={cn("flex flex-col bg-card border rounded-xl px-4 py-3 group transition-shadow",
         isDragging && "shadow-lg border-[#C8DA2D]/40")}>
 
-      <span className="text-xs font-bold text-muted-foreground/40 w-4 text-center select-none shrink-0">
-        {index + 1}
-      </span>
-
-      <button className="text-muted-foreground/30 hover:text-muted-foreground transition-colors cursor-grab active:cursor-grabbing shrink-0 touch-none"
-        {...attributes} {...listeners}>
-        <GripVertical size={16} />
-      </button>
-
-      {item.frente_cor && (
-        <div className="w-1 h-8 rounded-full shrink-0" style={{ backgroundColor: item.frente_cor }} />
-      )}
-
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium truncate">{item.titulo}</p>
-        {item.frente_nome && <p className="text-[10px] text-muted-foreground">{item.frente_nome}</p>}
-      </div>
-
-      {/* Time input — updates API on blur */}
-      <div className="flex items-center gap-1 shrink-0">
-        <Clock size={12} className="text-muted-foreground" />
-        <input
-          type="number" min={1} max={480}
-          value={localTempo || ""}
-          onChange={e => setLocalTempo(Math.max(1, parseInt(e.target.value) || 1))}
-          onBlur={() => { if (localTempo !== item.tempo_min) onTempoChange(localTempo); }}
-          className="w-14 h-7 text-xs rounded-md border border-border bg-background px-1.5 text-center focus:outline-none focus:border-[#C8DA2D] transition-colors"
-          title="Minutos estimados"
-        />
-        <span className="text-[10px] text-muted-foreground">min</span>
-      </div>
-
-      {/* Timer */}
-      <div className="flex items-center gap-0.5 shrink-0">
-        <button onClick={onTimerToggle} title={running ? "Pausar" : "Iniciar timer"}
-          className={cn("p-1.5 rounded-lg transition-colors",
-            running ? "text-[#C8DA2D] hover:text-foreground" : "text-muted-foreground hover:text-[#C8DA2D]")}>
-          {running ? <Pause size={13} /> : <Play size={13} />}
-        </button>
-        <span className={cn("text-xs font-mono min-w-[38px] text-center tabular-nums",
-          isDone ? "text-green-500 font-bold" : running ? "text-[#C8DA2D]" : "text-muted-foreground")}>
-          {isDone ? "00:00" : fmtTimer(elapsed, maxSec)}
+      {/* Main row */}
+      <div className="flex items-center gap-3">
+        <span className="text-xs font-bold text-muted-foreground/40 w-4 text-center select-none shrink-0">
+          {index + 1}
         </span>
-        {elapsed > 0 && (
-          <button onClick={onTimerReset} title="Reiniciar"
-            className="p-1 text-muted-foreground/50 hover:text-muted-foreground transition-colors">
-            <RotateCcw size={10} />
+
+        <button className="text-muted-foreground/30 hover:text-muted-foreground transition-colors cursor-grab active:cursor-grabbing shrink-0 touch-none"
+          {...attributes} {...listeners}>
+          <GripVertical size={16} />
+        </button>
+
+        {item.frente_cor && (
+          <div className="w-1 h-8 rounded-full shrink-0" style={{ backgroundColor: item.frente_cor }} />
+        )}
+
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium truncate">{item.titulo}</p>
+          {item.frente_nome && <p className="text-[10px] text-muted-foreground">{item.frente_nome}</p>}
+        </div>
+
+        {/* Time input */}
+        <div className="flex items-center gap-1 shrink-0">
+          <Clock size={12} className="text-muted-foreground" />
+          <input
+            type="number" min={1} max={480}
+            value={localTempo || ""}
+            onChange={e => setLocalTempo(Math.max(1, parseInt(e.target.value) || 1))}
+            onBlur={() => { if (localTempo !== item.tempo_min) onTempoChange(localTempo); }}
+            className="w-14 h-7 text-xs rounded-md border border-border bg-background px-1.5 text-center focus:outline-none focus:border-[#C8DA2D] transition-colors"
+            title="Minutos estimados"
+          />
+          <span className="text-[10px] text-muted-foreground">min</span>
+        </div>
+
+        {/* Timer */}
+        <div className="flex items-center gap-0.5 shrink-0">
+          <button onClick={onTimerToggle} title={running ? "Pausar" : "Iniciar timer"}
+            className={cn("p-1.5 rounded-lg transition-colors",
+              running ? "text-[#C8DA2D] hover:text-foreground" : "text-muted-foreground hover:text-[#C8DA2D]")}>
+            {running ? <Pause size={13} /> : <Play size={13} />}
           </button>
+          <span className={cn("text-xs font-mono min-w-[38px] text-center tabular-nums",
+            isDone ? "text-green-500 font-bold" : running ? "text-[#C8DA2D]" : "text-muted-foreground")}>
+            {isDone ? "00:00" : fmtTimer(elapsed, maxSec)}
+          </span>
+          {elapsed > 0 && (
+            <button onClick={onTimerReset} title="Reiniciar"
+              className="p-1 text-muted-foreground/50 hover:text-muted-foreground transition-colors">
+              <RotateCcw size={10} />
+            </button>
+          )}
+        </div>
+
+        {/* Complete */}
+        <button onClick={onComplete} title="Marcar como concluída"
+          className="p-1.5 rounded-lg text-muted-foreground hover:text-green-500 hover:bg-green-500/10 transition-colors shrink-0">
+          <Check size={15} />
+        </button>
+
+        {/* Remove */}
+        <button onClick={onRemove} title="Remover da fila"
+          className="p-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-500/10 transition-colors shrink-0">
+          <X size={15} />
+        </button>
+      </div>
+
+      {/* Subtarefas section */}
+      <div className="mt-2 ml-8 border-t border-border/30 pt-2" onClick={e => e.stopPropagation()}>
+        <button
+          onClick={() => setSubExpanded(v => !v)}
+          className="flex items-center gap-1.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+        >
+          {total > 0 ? (
+            <>
+              <div className="flex gap-[3px] items-center">
+                {subtarefas.slice(0, 8).map(s => (
+                  <div key={s.id} className={cn("w-[5px] h-[5px] rounded-full transition-colors",
+                    s.concluida ? "bg-[#C8DA2D]" : "bg-muted-foreground/25")} />
+                ))}
+                {total > 8 && <span className="ml-0.5">…</span>}
+              </div>
+              <span>{concluidas}/{total} etapas</span>
+            </>
+          ) : (
+            <span className="text-muted-foreground/50">+ Adicionar etapas</span>
+          )}
+          {subExpanded
+            ? <ChevronDown size={9} className="ml-1" />
+            : <ChevronRight size={9} className="ml-1" />}
+        </button>
+
+        {subExpanded && (
+          <div className="mt-1.5 space-y-1">
+            {subtarefas.map(s => (
+              <div key={s.id} className="flex items-center gap-1.5">
+                <button
+                  onClick={() => onToggleSubtarefa(s.id, !s.concluida)}
+                  className={cn(
+                    "w-3.5 h-3.5 rounded border-[1.5px] shrink-0 flex items-center justify-center transition-all",
+                    s.concluida
+                      ? "bg-[#C8DA2D] border-[#C8DA2D]"
+                      : "border-muted-foreground/40 hover:border-[#C8DA2D]"
+                  )}
+                >
+                  {s.concluida && <Check size={8} className="text-[#0C1923]" strokeWidth={3} />}
+                </button>
+                <span className={cn("text-xs flex-1 leading-tight",
+                  s.concluida && "line-through text-muted-foreground")}>
+                  {s.titulo}
+                </span>
+              </div>
+            ))}
+
+            {/* Inline add */}
+            <div className="flex items-center gap-1.5 pt-0.5">
+              <div className="w-3.5 h-3.5 rounded border-[1.5px] border-muted-foreground/20 shrink-0" />
+              <input
+                ref={subInputRef}
+                value={newSubInput}
+                onChange={e => setNewSubInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === "Enter") handleAddSub();
+                  if (e.key === "Escape") setNewSubInput("");
+                }}
+                placeholder="Nova etapa… (Enter)"
+                className="text-xs flex-1 bg-transparent border-none outline-none placeholder:text-muted-foreground/30"
+              />
+              {newSubInput.trim() && (
+                <button onClick={handleAddSub} className="shrink-0 text-[#C8DA2D]">
+                  <Check size={10} />
+                </button>
+              )}
+            </div>
+          </div>
         )}
       </div>
-
-      {/* Complete */}
-      <button onClick={onComplete} title="Marcar como concluída"
-        className="p-1.5 rounded-lg text-muted-foreground hover:text-green-500 hover:bg-green-500/10 transition-colors shrink-0">
-        <Check size={15} />
-      </button>
-
-      {/* Remove */}
-      <button onClick={onRemove} title="Remover da fila"
-        className="p-1.5 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-500/10 transition-colors shrink-0">
-        <X size={15} />
-      </button>
     </div>
   );
 }

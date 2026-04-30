@@ -10,10 +10,14 @@ router = APIRouter(tags=["subtarefas"])
 class SubtarefaCreate(BaseModel):
     tarefa_id: str
     titulo: str
+    descricao: Optional[str] = None
+    observacao: Optional[str] = None
 
 
 class SubtarefaUpdate(BaseModel):
     titulo: Optional[str] = None
+    descricao: Optional[str] = None
+    observacao: Optional[str] = None
     concluida: Optional[bool] = None
 
 

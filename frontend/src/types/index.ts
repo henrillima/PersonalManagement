@@ -8,7 +8,7 @@ export interface LoginRequest {
 // ── Tarefas ───────────────────────────────────────────────────────────────────
 
 export type Prioridade = "alta" | "media" | "baixa";
-export type TarefaStatus = "todo" | "in_progress" | "done" | "blocked";
+export type TarefaStatus = "todo" | "in_progress" | "done" | "blocked" | "stand_by";
 
 export interface Frente {
   id: string;
@@ -290,6 +290,8 @@ export interface Subtarefa {
   tarefa_id: string;
   user_id: string;
   titulo: string;
+  descricao?: string | null;
+  observacao?: string | null;
   concluida: boolean;
   ordem: number;
   criado_em: string;

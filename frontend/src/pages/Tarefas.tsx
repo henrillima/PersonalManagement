@@ -36,10 +36,11 @@ const TODAY = new Date().toISOString().slice(0, 10);
 const MES_ATUAL = new Date().toISOString().slice(0, 7);
 
 const COLUMNS: { id: TarefaStatus; label: string; bg: string }[] = [
-  { id: "todo",        label: "A Fazer",      bg: "bg-slate-50 dark:bg-slate-800/50" },
-  { id: "in_progress", label: "Em Andamento", bg: "bg-blue-50 dark:bg-blue-950/30"  },
-  { id: "done",        label: "Concluído",    bg: "bg-green-50 dark:bg-green-950/30" },
-  { id: "blocked",     label: "Bloqueado",    bg: "bg-red-50 dark:bg-red-950/30"    },
+  { id: "todo",        label: "A Fazer",      bg: "bg-slate-50 dark:bg-slate-800/50"    },
+  { id: "in_progress", label: "Em Andamento", bg: "bg-blue-50 dark:bg-blue-950/30"      },
+  { id: "stand_by",    label: "Stand-by",     bg: "bg-purple-50 dark:bg-purple-950/30"  },
+  { id: "done",        label: "Concluído",    bg: "bg-green-50 dark:bg-green-950/30"    },
+  { id: "blocked",     label: "Bloqueado",    bg: "bg-red-50 dark:bg-red-950/30"        },
 ];
 
 const COLUMN_IDS = new Set(COLUMNS.map(c => c.id as string));
@@ -58,10 +59,11 @@ const PRIORIDADES: { value: Prioridade; label: string; cor: string }[] = [
 ];
 
 const STATUS_ACTIONS: Record<TarefaStatus, { label: string; next: TarefaStatus }[]> = {
-  todo:        [{ label: "Iniciar",  next: "in_progress" }, { label: "Bloquear", next: "blocked" }],
-  in_progress: [{ label: "Concluir", next: "done"        }, { label: "Bloquear", next: "blocked" }],
-  done:        [{ label: "Reabrir",  next: "todo"        }],
-  blocked:     [{ label: "Retomar",  next: "in_progress" }, { label: "Concluir", next: "done"   }],
+  todo:        [{ label: "Iniciar",   next: "in_progress" }, { label: "Stand-by", next: "stand_by" }, { label: "Bloquear", next: "blocked"    }],
+  in_progress: [{ label: "Concluir", next: "done"         }, { label: "Stand-by", next: "stand_by" }, { label: "Bloquear", next: "blocked"    }],
+  stand_by:    [{ label: "Retomar",  next: "in_progress"  }, { label: "Concluir", next: "done"     }],
+  done:        [{ label: "Reabrir",  next: "todo"         }],
+  blocked:     [{ label: "Retomar",  next: "in_progress"  }, { label: "Stand-by", next: "stand_by" }, { label: "Concluir", next: "done"       }],
 };
 
 function isOverdue(t: Tarefa) {
@@ -126,6 +128,7 @@ export default function Tarefas() {
   const [recOpenCreate, setRecOpenCreate] = useState(false);
   const [mesOcorrencias, setMesOcorrencias] = useState(MES_ATUAL);
   const [dateFilter, setDateFilter] = useState<"all" | "week" | "15d" | "month">("all");
+  const [hideRecurrentes, setHideRecurrentes] = useState(false);
   const [activeOcorrencia, setActiveOcorrencia] = useState<TarefaRecorrenteOcorrencia | null>(null);
   const [localOcorrencias, setLocalOcorrencias] = useState<TarefaRecorrenteOcorrencia[]>([]);
 
@@ -257,6 +260,12 @@ export default function Tarefas() {
     onSettled: () => qc.invalidateQueries({ queryKey: ["subtarefas"] }),
   });
 
+  const updateSubtarefa = useMutation({
+    mutationFn: ({ id, d }: { id: string; d: object }) =>
+      apiFetch(`/api/v1/subtarefas/${id}`, { method: "PATCH", body: JSON.stringify(d) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["subtarefas"] }),
+  });
+
   const deleteSubtarefa = useMutation({
     mutationFn: (id: string) => apiFetch(`/api/v1/subtarefas/${id}`, { method: "DELETE" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["subtarefas"] }),
@@ -343,7 +352,7 @@ export default function Tarefas() {
     });
 
   function getColOcorrencias(s: TarefaStatus) {
-    if (catTab === "arquivo" || catTab === "recorrentes") return [];
+    if (catTab === "arquivo" || catTab === "recorrentes" || hideRecurrentes) return [];
     return localOcorrencias.filter(oc =>
       (catTab === "todas" || oc.categoria === catTab) &&
       (priorFilter === "all" || oc.prioridade === priorFilter) &&
@@ -463,7 +472,7 @@ export default function Tarefas() {
       titulo: form.titulo, descricao: form.descricao || undefined,
       frente_id: form.frente_id || undefined, categoria: form.categoria,
       prioridade: form.prioridade, status: form.status,
-      data_limite: form.data_limite || undefined, observacao: form.observacao || undefined,
+      data_limite: form.data_limite || null, observacao: form.observacao || undefined,
     };
     if (editing) {
       updateTarefa.mutate({ id: editing.id, d: payload }, { onSuccess: () => setTaskOpen(false) });
@@ -577,29 +586,67 @@ export default function Tarefas() {
       ) : (
         <>
           {/* Filters */}
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex gap-1.5 flex-wrap">
-              <FilterPill active={frenteFilter === "all"} onClick={() => setFrenteFilter("all")}>Todos os projetos</FilterPill>
-              {projetosForTab.map(f => (
-                <FilterPill key={f.id} active={frenteFilter === f.id} color={f.cor}
-                  onClick={() => setFrenteFilter(frenteFilter === f.id ? "all" : f.id)}>
-                  {f.nome}
-                </FilterPill>
-              ))}
-              <span className="w-px bg-border self-stretch mx-1" />
-              <FilterPill active={priorFilter === "all"} onClick={() => setPriorFilter("all")}>Todas prioridades</FilterPill>
-              {PRIORIDADES.map(p => (
-                <FilterPill key={p.value} active={priorFilter === p.value} color={p.cor}
-                  onClick={() => setPriorFilter(priorFilter === p.value ? "all" : p.value)}>
-                  {p.label}
-                </FilterPill>
-              ))}
-              <span className="w-px bg-border self-stretch mx-1" />
-              <FilterPill active={dateFilter === "all"} onClick={() => setDateFilter("all")}>📅 Todos os prazos</FilterPill>
-              <FilterPill active={dateFilter === "week"}  onClick={() => setDateFilter(dateFilter === "week"  ? "all" : "week")}>7 dias</FilterPill>
-              <FilterPill active={dateFilter === "15d"}   onClick={() => setDateFilter(dateFilter === "15d"   ? "all" : "15d")}>15 dias</FilterPill>
-              <FilterPill active={dateFilter === "month"} onClick={() => setDateFilter(dateFilter === "month" ? "all" : "month")}>30 dias</FilterPill>
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex gap-2 items-center flex-wrap">
+              <Select value={frenteFilter} onValueChange={setFrenteFilter}>
+                <SelectTrigger className="h-8 text-xs w-44">
+                  <SelectValue placeholder="Todos os projetos" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos os projetos</SelectItem>
+                  {projetosForTab.map(f => (
+                    <SelectItem key={f.id} value={f.id}>
+                      <span className="flex items-center gap-1.5">
+                        <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: f.cor }} />
+                        {f.nome}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Select value={priorFilter} onValueChange={v => setPriorFilter(v as Prioridade | "all")}>
+                <SelectTrigger className="h-8 text-xs w-40">
+                  <SelectValue placeholder="Todas prioridades" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas prioridades</SelectItem>
+                  {PRIORIDADES.map(p => (
+                    <SelectItem key={p.value} value={p.value}>
+                      <span className="flex items-center gap-1.5">
+                        <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: p.cor }} />
+                        {p.label}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Select value={dateFilter} onValueChange={v => setDateFilter(v as "all" | "week" | "15d" | "month")}>
+                <SelectTrigger className="h-8 text-xs w-36">
+                  <SelectValue placeholder="Todos os prazos" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">📅 Todos os prazos</SelectItem>
+                  <SelectItem value="week">7 dias</SelectItem>
+                  <SelectItem value="15d">15 dias</SelectItem>
+                  <SelectItem value="month">30 dias</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <button
+                onClick={() => setHideRecurrentes(v => !v)}
+                className={cn(
+                  "flex items-center gap-1.5 h-8 px-3 rounded-md border text-xs font-medium transition-colors",
+                  hideRecurrentes
+                    ? "bg-indigo-500/10 border-indigo-500/40 text-indigo-400"
+                    : "border-border text-muted-foreground hover:border-foreground/40 hover:text-foreground"
+                )}
+              >
+                🔁 {hideRecurrentes ? "Exibir recorrentes" : "Ocultar recorrentes"}
+              </button>
             </div>
+
             <div className="flex items-center gap-1 shrink-0 border border-border rounded-lg px-2 py-1 text-xs text-muted-foreground">
               <span className="text-[11px]">🔁</span>
               <button onClick={() => setMesOcorrencias(m => addMonths(m, -1))} className="p-0.5 hover:text-foreground transition-colors">
@@ -614,7 +661,7 @@ export default function Tarefas() {
 
           {/* Kanban */}
           {(lF || lT) ? (
-            <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 xl:grid-cols-5 gap-4">
               {COLUMNS.map(col => (
                 <div key={col.id} className="space-y-2">
                   <Skeleton className="h-9 rounded-lg" />
@@ -630,7 +677,7 @@ export default function Tarefas() {
               onDragOver={handleDragOver}
               onDragEnd={handleDragEnd}
             >
-              <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 xl:grid-cols-5 gap-4">
                 {COLUMNS.map(col => {
                   const items   = getColVisible(col.id);
                   const recItems = getColOcorrencias(col.id);
@@ -658,6 +705,7 @@ export default function Tarefas() {
                             subtarefas={subtarefas.filter(s => s.tarefa_id === t.id)}
                             onToggleSubtarefa={(id, concluida) => toggleSubtarefa.mutate({ id, concluida })}
                             onAddSubtarefa={titulo => createSubtarefa.mutate({ tarefa_id: t.id, titulo })}
+                            onUpdateSubtarefa={(id, d) => updateSubtarefa.mutate({ id, d })}
                             onDeleteSubtarefa={id => deleteSubtarefa.mutate(id)}
                           />
                         ))}
@@ -731,6 +779,7 @@ export default function Tarefas() {
                   <SelectContent>
                     <SelectItem value="todo">A Fazer</SelectItem>
                     <SelectItem value="in_progress">Em Andamento</SelectItem>
+                    <SelectItem value="stand_by">Stand-by</SelectItem>
                     <SelectItem value="done">Concluído</SelectItem>
                     <SelectItem value="blocked">Bloqueado</SelectItem>
                   </SelectContent>
@@ -1062,13 +1111,18 @@ interface CardContentProps {
   subtarefas?: Subtarefa[];
   onToggleSubtarefa?: (id: string, concluida: boolean) => void;
   onAddSubtarefa?: (titulo: string) => void;
+  onUpdateSubtarefa?: (id: string, d: { titulo?: string; descricao?: string | null; observacao?: string | null }) => void;
   onDeleteSubtarefa?: (id: string) => void;
 }
 
-function CardContent({ tarefa, overlay, overdue, showCategoria, dragListeners, onEdit, onDelete, onStatus, onEngage, onArchive, subtarefas = [], onToggleSubtarefa, onAddSubtarefa, onDeleteSubtarefa }: CardContentProps) {
+function CardContent({ tarefa, overlay, overdue, showCategoria, dragListeners, onEdit, onDelete, onStatus, onEngage, onArchive, subtarefas = [], onToggleSubtarefa, onAddSubtarefa, onUpdateSubtarefa, onDeleteSubtarefa }: CardContentProps) {
   const prioridade = PRIORIDADES.find(p => p.value === tarefa.prioridade);
   const [subExpanded, setSubExpanded] = useState(false);
   const [newSubInput, setNewSubInput] = useState("");
+  const [editSubId, setEditSubId] = useState<string | null>(null);
+  const [editSubTitulo, setEditSubTitulo] = useState("");
+  const [editSubDesc, setEditSubDesc] = useState("");
+  const [editSubObs, setEditSubObs] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   const total     = subtarefas.length;
@@ -1083,6 +1137,23 @@ function CardContent({ tarefa, overlay, overdue, showCategoria, dragListeners, o
     if (!titulo) return;
     onAddSubtarefa?.(titulo);
     setNewSubInput("");
+  }
+
+  function startSubEdit(s: Subtarefa) {
+    setEditSubId(s.id);
+    setEditSubTitulo(s.titulo);
+    setEditSubDesc(s.descricao ?? "");
+    setEditSubObs(s.observacao ?? "");
+  }
+
+  function saveSubEdit(id: string) {
+    if (!editSubTitulo.trim()) return;
+    onUpdateSubtarefa?.(id, {
+      titulo: editSubTitulo.trim(),
+      descricao: editSubDesc || null,
+      observacao: editSubObs || null,
+    });
+    setEditSubId(null);
   }
 
   return (
@@ -1172,31 +1243,79 @@ function CardContent({ tarefa, overlay, overdue, showCategoria, dragListeners, o
                 {subExpanded && (
                   <div className="mt-1.5 space-y-1">
                     {subtarefas.map(s => (
-                      <div key={s.id} className="flex items-center gap-1.5 group/sub">
-                        <button
-                          onClick={() => onToggleSubtarefa?.(s.id, !s.concluida)}
-                          className={cn(
-                            "w-3.5 h-3.5 rounded border-[1.5px] shrink-0 flex items-center justify-center transition-all",
-                            s.concluida
-                              ? "bg-[#C8DA2D] border-[#C8DA2D]"
-                              : "border-muted-foreground/40 hover:border-[#C8DA2D]"
+                      editSubId === s.id ? (
+                        <div key={s.id} className="space-y-1 p-1.5 rounded-lg bg-muted/30 border border-border/50">
+                          <input
+                            value={editSubTitulo}
+                            onChange={e => setEditSubTitulo(e.target.value)}
+                            onKeyDown={e => { if (e.key === "Enter") saveSubEdit(s.id); if (e.key === "Escape") setEditSubId(null); }}
+                            autoFocus
+                            className="text-xs w-full bg-transparent border-b border-[#C8DA2D]/50 outline-none pb-0.5 font-medium"
+                          />
+                          <textarea
+                            value={editSubDesc}
+                            onChange={e => setEditSubDesc(e.target.value)}
+                            placeholder="Descrição..."
+                            rows={2}
+                            className="text-[10px] w-full bg-transparent border border-border/40 rounded p-1 outline-none resize-none placeholder:text-muted-foreground/40"
+                          />
+                          <textarea
+                            value={editSubObs}
+                            onChange={e => setEditSubObs(e.target.value)}
+                            placeholder="Observações..."
+                            rows={1}
+                            className="text-[10px] w-full bg-transparent border border-border/40 rounded p-1 outline-none resize-none placeholder:text-muted-foreground/40"
+                          />
+                          <div className="flex gap-1.5 justify-end">
+                            <button onClick={() => saveSubEdit(s.id)} className="text-green-500 p-0.5 hover:text-green-400 transition-colors">
+                              <Check size={10} />
+                            </button>
+                            <button onClick={() => setEditSubId(null)} className="text-muted-foreground p-0.5 hover:text-foreground transition-colors">
+                              <X size={10} />
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div key={s.id} className="group/sub">
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => onToggleSubtarefa?.(s.id, !s.concluida)}
+                              className={cn(
+                                "w-3.5 h-3.5 rounded border-[1.5px] shrink-0 flex items-center justify-center transition-all",
+                                s.concluida
+                                  ? "bg-[#C8DA2D] border-[#C8DA2D]"
+                                  : "border-muted-foreground/40 hover:border-[#C8DA2D]"
+                              )}
+                            >
+                              {s.concluida && <Check size={8} className="text-[#0C1923]" strokeWidth={3} />}
+                            </button>
+                            <span className={cn(
+                              "text-xs flex-1 leading-tight",
+                              s.concluida && "line-through text-muted-foreground"
+                            )}>
+                              {s.titulo}
+                            </span>
+                            <button
+                              onClick={() => startSubEdit(s)}
+                              className="p-0.5 text-muted-foreground/30 hover:text-blue-400 transition-colors opacity-0 group-hover/sub:opacity-100 shrink-0"
+                            >
+                              <Pencil size={8} />
+                            </button>
+                            <button
+                              onClick={() => onDeleteSubtarefa?.(s.id)}
+                              className="p-0.5 text-muted-foreground/30 hover:text-red-500 transition-colors opacity-0 group-hover/sub:opacity-100 shrink-0"
+                            >
+                              <X size={9} />
+                            </button>
+                          </div>
+                          {(s.descricao || s.observacao) && (
+                            <div className="ml-5 mt-0.5 space-y-0.5">
+                              {s.descricao && <p className="text-[10px] text-muted-foreground leading-tight">{s.descricao}</p>}
+                              {s.observacao && <p className="text-[10px] text-muted-foreground/60 leading-tight italic">{s.observacao}</p>}
+                            </div>
                           )}
-                        >
-                          {s.concluida && <Check size={8} className="text-[#0C1923]" strokeWidth={3} />}
-                        </button>
-                        <span className={cn(
-                          "text-xs flex-1 leading-tight",
-                          s.concluida && "line-through text-muted-foreground"
-                        )}>
-                          {s.titulo}
-                        </span>
-                        <button
-                          onClick={() => onDeleteSubtarefa?.(s.id)}
-                          className="p-0.5 text-muted-foreground/30 hover:text-red-500 transition-colors opacity-0 group-hover/sub:opacity-100 shrink-0"
-                        >
-                          <X size={9} />
-                        </button>
-                      </div>
+                        </div>
+                      )
                     ))}
                     {/* Inline add input */}
                     <div className="flex items-center gap-1.5 pt-0.5">
@@ -1254,9 +1373,7 @@ function CardContent({ tarefa, overlay, overdue, showCategoria, dragListeners, o
 
 // ── SortableCard ───────────────────────────────────────────────────────────────
 
-interface SortableCardProps extends Omit<CardContentProps, "overlay" | "dragListeners"> {
-  isDragging: boolean;
-}
+type SortableCardProps = Omit<CardContentProps, "overlay" | "dragListeners"> & { isDragging: boolean };
 
 function SortableCard({ tarefa, isDragging, ...rest }: SortableCardProps) {
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: tarefa.id });
@@ -1275,10 +1392,11 @@ function SortableCard({ tarefa, isDragging, ...rest }: SortableCardProps) {
 // ── RecorrenteCardContent ──────────────────────────────────────────────────────
 
 const REC_STATUS_ACTIONS: Record<string, { label: string; next: TarefaStatus }[]> = {
-  todo:        [{ label: "Iniciar",  next: "in_progress" }, { label: "Bloquear", next: "blocked" }],
-  in_progress: [{ label: "Concluir", next: "done"        }, { label: "Bloquear", next: "blocked" }],
-  done:        [{ label: "Reabrir",  next: "todo"        }],
-  blocked:     [{ label: "Retomar",  next: "in_progress" }, { label: "Concluir", next: "done"   }],
+  todo:        [{ label: "Iniciar",   next: "in_progress" }, { label: "Stand-by", next: "stand_by" }, { label: "Bloquear", next: "blocked"    }],
+  in_progress: [{ label: "Concluir", next: "done"         }, { label: "Stand-by", next: "stand_by" }, { label: "Bloquear", next: "blocked"    }],
+  stand_by:    [{ label: "Retomar",  next: "in_progress"  }, { label: "Concluir", next: "done"     }],
+  done:        [{ label: "Reabrir",  next: "todo"         }],
+  blocked:     [{ label: "Retomar",  next: "in_progress"  }, { label: "Stand-by", next: "stand_by" }, { label: "Concluir", next: "done"       }],
 };
 
 function RecorrenteCardContent({ oc, showCategoria, overlay, dragListeners, onStatus }: {
@@ -1380,23 +1498,6 @@ function SortableRecorrenteCard({ oc, isDragging, showCategoria, onStatus }: {
         onStatus={onStatus}
       />
     </div>
-  );
-}
-
-// ── FilterPill ─────────────────────────────────────────────────────────────────
-
-function FilterPill({ active, color, onClick, children }: {
-  active: boolean; color?: string; onClick: () => void; children: React.ReactNode;
-}) {
-  const style = active && color ? { backgroundColor: color + "30", color, borderColor: color } : undefined;
-  return (
-    <button onClick={onClick} style={style}
-      className={cn(
-        "px-3 py-1.5 rounded-full text-xs font-medium border transition-colors",
-        active && !color ? "bg-[#0C1923] text-white border-[#0C1923]" : "bg-background border-border hover:border-foreground/40"
-      )}>
-      {children}
-    </button>
   );
 }
 

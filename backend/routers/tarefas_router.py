@@ -145,7 +145,7 @@ def create_tarefa(body: TarefaCreate, _: str = Depends(verify_token)):
 @router.patch("/tarefas/{tarefa_id}")
 def update_tarefa(tarefa_id: str, body: TarefaUpdate, _: str = Depends(verify_token)):
     db = get_db()
-    payload = body.model_dump(exclude_none=True)
+    payload = body.model_dump(exclude_unset=True)
     if not payload:
         raise HTTPException(400, "Nenhum campo para atualizar")
     if payload.get("status") == "done":

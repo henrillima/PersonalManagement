@@ -5,6 +5,11 @@ import {
   ChevronLeft, ChevronRight, Plus, Calendar, Clock,
   AlertCircle, Trash2, Archive, Wallet, Check,
 } from "lucide-react";
+import {
+  DndContext, DragOverlay, closestCenter,
+  PointerSensor, useSensor, useSensors, useDraggable, useDroppable,
+  type DragStartEvent, type DragEndEvent,
+} from "@dnd-kit/core";
 import { apiFetch, fmtBRL, fmtDate } from "@/lib/api";
 import type {
   EventoAgenda, Tarefa, FluxoPontual, FluxoRecorrente,
@@ -32,7 +37,8 @@ const PRIORIDADES: { value: Prioridade; label: string }[] = [
 ];
 const STATUSES: { value: TarefaStatus; label: string }[] = [
   { value: "todo", label: "A Fazer" }, { value: "in_progress", label: "Em Andamento" },
-  { value: "done", label: "Concluído" }, { value: "blocked", label: "Bloqueado" },
+  { value: "stand_by", label: "Stand-by" }, { value: "done", label: "Concluído" },
+  { value: "blocked", label: "Bloqueado" },
 ];
 
 const TODAY_STR = new Date().toISOString().slice(0, 10);
@@ -58,6 +64,10 @@ export default function Rotina() {
   const qc = useQueryClient();
 
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date(), { weekStartsOn: 1 }));
+
+  // Drag state
+  const [draggingTarefa, setDraggingTarefa] = useState<Tarefa | null>(null);
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
   // Dialogs
   const [criarOpen, setCriarOpen]           = useState(false);
@@ -211,6 +221,27 @@ export default function Rotina() {
     },
   });
 
+  // ── Drag handlers ─────────────────────────────────────────────────────────────
+
+  function handleDragStart({ active }: DragStartEvent) {
+    const task = tarefas.find(t => t.id === active.id);
+    setDraggingTarefa(task ?? null);
+  }
+
+  function handleDragEnd({ active, over }: DragEndEvent) {
+    setDraggingTarefa(null);
+    if (!over) return;
+    const task = tarefas.find(t => t.id === active.id);
+    const newDate = over.id as string;
+    if (!task || task.data_limite === newDate) return;
+
+    // Optimistic update
+    qc.setQueryData<Tarefa[]>(["tarefas"], old =>
+      (old ?? []).map(t => t.id === task.id ? { ...t, data_limite: newDate } : t)
+    );
+    updateTarefa.mutate({ id: task.id, d: { data_limite: newDate } });
+  }
+
   // ── Per-day helpers ───────────────────────────────────────────────────────────
 
   function eventosForDay(day: Date) {
@@ -293,7 +324,7 @@ export default function Rotina() {
       frente_id: tForm.frente_id || undefined,
       prioridade: tForm.prioridade,
       status: tForm.status,
-      data_limite: tForm.data_limite || undefined,
+      data_limite: tForm.data_limite || null,
       observacao: tForm.observacao || undefined,
     }});
   }
@@ -370,97 +401,117 @@ export default function Rotina() {
 
       {/* 7-column week grid */}
       <div className="overflow-x-auto pb-4">
-        <div className="grid grid-cols-7 gap-2 min-w-[700px]">
-          {days.map((day, i) => {
-            const isToday     = isSameDay(day, today);
-            const dayEvs      = eventosForDay(day);
-            const dayTarefas  = tarefasForDay(day);
-            const dayFluxos   = fluxosForDay(day);
-            const dayTercs    = terceirosForDay(day);
-            const dayFatVenc  = faturaVencimentosForDay(day);
-            const dayRotinas  = tarefasRecorrentesForDay(day);
-            const totalItems  = dayEvs.length + dayTarefas.length + dayFluxos.length + dayTercs.length + dayFatVenc.length + dayRotinas.length;
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+        >
+          <div className="grid grid-cols-7 gap-2 min-w-[700px]">
+            {days.map((day, i) => {
+              const isToday     = isSameDay(day, today);
+              const dayStr      = format(day, "yyyy-MM-dd");
+              const dayEvs      = eventosForDay(day);
+              const dayTarefas  = tarefasForDay(day);
+              const dayFluxos   = fluxosForDay(day);
+              const dayTercs    = terceirosForDay(day);
+              const dayFatVenc  = faturaVencimentosForDay(day);
+              const dayRotinas  = tarefasRecorrentesForDay(day);
+              const totalItems  = dayEvs.length + dayTarefas.length + dayFluxos.length + dayTercs.length + dayFatVenc.length + dayRotinas.length;
 
-            return (
-              <div key={i} className="flex flex-col gap-1.5">
+              return (
+                <div key={i} className="flex flex-col gap-1.5">
 
-                {/* Day header */}
-                <button
-                  onClick={() => openCreate(day)}
-                  className={cn(
-                    "flex flex-col items-center py-2.5 px-1 rounded-xl border transition-all hover:bg-muted/50",
-                    isToday
-                      ? "bg-[#C8DA2D]/10 border-[#C8DA2D]/40 shadow-sm"
-                      : "border-border"
-                  )}
-                >
-                  <span className="text-[9px] font-semibold text-muted-foreground uppercase tracking-widest">
-                    {DIAS_SEMANA[i]}
-                  </span>
-                  <span className={cn(
-                    "text-xl font-bold leading-tight mt-0.5",
-                    isToday ? "text-[#C8DA2D]" : "text-foreground"
-                  )}>
-                    {day.getDate()}
-                  </span>
-                  <span className="text-[9px] text-muted-foreground">{MESES[day.getMonth()]}</span>
-                  {totalItems > 0 && (
-                    <span className={cn(
-                      "mt-1 text-[9px] font-semibold px-1.5 py-0.5 rounded-full",
-                      isToday ? "bg-[#C8DA2D]/20 text-[#C8DA2D]" : "bg-muted text-muted-foreground"
-                    )}>
-                      {totalItems}
+                  {/* Day header */}
+                  <button
+                    onClick={() => openCreate(day)}
+                    className={cn(
+                      "flex flex-col items-center py-2.5 px-1 rounded-xl border transition-all hover:bg-muted/50",
+                      isToday
+                        ? "bg-[#C8DA2D]/10 border-[#C8DA2D]/40 shadow-sm"
+                        : "border-border"
+                    )}
+                  >
+                    <span className="text-[9px] font-semibold text-muted-foreground uppercase tracking-widest">
+                      {DIAS_SEMANA[i]}
                     </span>
-                  )}
-                </button>
+                    <span className={cn(
+                      "text-xl font-bold leading-tight mt-0.5",
+                      isToday ? "text-[#C8DA2D]" : "text-foreground"
+                    )}>
+                      {day.getDate()}
+                    </span>
+                    <span className="text-[9px] text-muted-foreground">{MESES[day.getMonth()]}</span>
+                    {totalItems > 0 && (
+                      <span className={cn(
+                        "mt-1 text-[9px] font-semibold px-1.5 py-0.5 rounded-full",
+                        isToday ? "bg-[#C8DA2D]/20 text-[#C8DA2D]" : "bg-muted text-muted-foreground"
+                      )}>
+                        {totalItems}
+                      </span>
+                    )}
+                  </button>
 
-                {/* Cards */}
-                <div className="flex flex-col gap-1">
+                  {/* Cards — drop zone for tasks */}
+                  <DroppableDayColumn dayStr={dayStr} hasDragging={!!draggingTarefa}>
 
-                  {/* Events */}
-                  {dayEvs.map(ev => (
-                    <EventoCard key={ev.id} evento={ev} onClick={() => setSelectedEvento(ev)} />
-                  ))}
+                    {/* Events */}
+                    {dayEvs.map(ev => (
+                      <EventoCard key={ev.id} evento={ev} onClick={() => setSelectedEvento(ev)} />
+                    ))}
 
-                  {/* Tasks */}
-                  {dayTarefas.map(t => (
-                    <TarefaCard key={t.id} tarefa={t} onClick={() => openEditTarefa(t)} />
-                  ))}
+                    {/* Tasks — draggable */}
+                    {dayTarefas.map(t => (
+                      <DraggableTarefaCard
+                        key={t.id}
+                        tarefa={t}
+                        isDraggingThis={draggingTarefa?.id === t.id}
+                        onClick={() => openEditTarefa(t)}
+                      />
+                    ))}
 
-                  {/* Financial flows (receitas + despesas) */}
-                  {dayFluxos.map(f => f.isReceita
-                    ? <ReceitaCard key={f.id} fluxo={f} />
-                    : <DespesaCard key={f.id} despesa={f} />
-                  )}
+                    {/* Financial flows (receitas + despesas) */}
+                    {dayFluxos.map(f => f.isReceita
+                      ? <ReceitaCard key={f.id} fluxo={f} />
+                      : <DespesaCard key={f.id} despesa={f} />
+                    )}
 
-                  {/* Terceiros (a receber) */}
-                  {dayTercs.map(t => (
-                    <TerceiroCard key={t.id} terceiro={t} />
-                  ))}
+                    {/* Terceiros (a receber) */}
+                    {dayTercs.map(t => (
+                      <TerceiroCard key={t.id} terceiro={t} />
+                    ))}
 
-                  {/* Fatura vencimentos */}
-                  {dayFatVenc.map(f => (
-                    <FaturaVencCard key={f.cartao} item={f} />
-                  ))}
+                    {/* Fatura vencimentos */}
+                    {dayFatVenc.map(f => (
+                      <FaturaVencCard key={f.cartao} item={f} />
+                    ))}
 
-                  {/* Tarefas recorrentes */}
-                  {dayRotinas.map(o => (
-                    <TarefaRecorrenteCard
-                      key={o.id}
-                      ocorrencia={o}
-                      onToggle={() => toggleOcorrencia.mutate({ id: o.id, concluida: !o.concluida })}
-                    />
-                  ))}
+                    {/* Tarefas recorrentes */}
+                    {dayRotinas.map(o => (
+                      <TarefaRecorrenteCard
+                        key={o.id}
+                        ocorrencia={o}
+                        onToggle={() => toggleOcorrencia.mutate({ id: o.id, concluida: !o.concluida })}
+                      />
+                    ))}
 
-                  {/* Empty */}
-                  {totalItems === 0 && (
-                    <div className="h-12 rounded-lg border border-dashed border-border/30" />
-                  )}
+                    {/* Empty */}
+                    {totalItems === 0 && (
+                      <div className="h-12 rounded-lg border border-dashed border-border/30" />
+                    )}
+
+                  </DroppableDayColumn>
                 </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+
+          <DragOverlay dropAnimation={null}>
+            {draggingTarefa && (
+              <TarefaCard tarefa={draggingTarefa} onClick={() => {}} overlay />
+            )}
+          </DragOverlay>
+        </DndContext>
       </div>
 
       {/* ── Dialogs ─────────────────────────────────────────────────────────────── */}
@@ -661,6 +712,48 @@ export default function Rotina() {
   );
 }
 
+// ── DroppableDayColumn ─────────────────────────────────────────────────────────
+
+function DroppableDayColumn({ dayStr, hasDragging, children }: {
+  dayStr: string;
+  hasDragging: boolean;
+  children: React.ReactNode;
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: dayStr });
+  return (
+    <div
+      ref={setNodeRef}
+      className={cn(
+        "flex flex-col gap-1 rounded-lg p-0.5 -m-0.5 min-h-[3rem] transition-all",
+        isOver && "bg-[#C8DA2D]/8 ring-1 ring-[#C8DA2D]/40",
+        hasDragging && !isOver && "ring-1 ring-border/50"
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+// ── DraggableTarefaCard ────────────────────────────────────────────────────────
+
+function DraggableTarefaCard({ tarefa, isDraggingThis, onClick }: {
+  tarefa: Tarefa;
+  isDraggingThis: boolean;
+  onClick: () => void;
+}) {
+  const { attributes, listeners, setNodeRef } = useDraggable({ id: tarefa.id });
+  return (
+    <div
+      ref={setNodeRef}
+      {...attributes}
+      {...listeners}
+      className={cn("touch-none", isDraggingThis && "opacity-30")}
+    >
+      <TarefaCard tarefa={tarefa} onClick={isDraggingThis ? () => {} : onClick} />
+    </div>
+  );
+}
+
 // ── Card sub-components ────────────────────────────────────────────────────────
 
 function EventoCard({ evento, onClick }: { evento: EventoAgenda; onClick: () => void }) {
@@ -684,14 +777,15 @@ function EventoCard({ evento, onClick }: { evento: EventoAgenda; onClick: () => 
   );
 }
 
-function TarefaCard({ tarefa, onClick }: { tarefa: Tarefa; onClick: () => void }) {
+function TarefaCard({ tarefa, onClick, overlay }: { tarefa: Tarefa; onClick: () => void; overlay?: boolean }) {
   const overdue = isOverdue(tarefa);
   const cor     = PRIO_COR[tarefa.prioridade] ?? "#94a3b8";
 
   return (
     <div onClick={onClick} className={cn(
       "bg-card border rounded-lg px-2 py-1.5 cursor-pointer transition-all hover:shadow-sm group",
-      overdue ? "border-red-500/50 bg-red-500/5 hover:border-red-500/70" : "border-border hover:border-[#C8DA2D]/60"
+      overdue ? "border-red-500/50 bg-red-500/5 hover:border-red-500/70" : "border-border hover:border-[#C8DA2D]/60",
+      overlay && "shadow-xl rotate-1 opacity-95 cursor-grabbing"
     )}>
       {overdue && (
         <p className="text-[9px] font-bold text-red-400 leading-none mb-0.5">⚠ Atrasada</p>
